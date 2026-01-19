@@ -9,8 +9,9 @@
   --volume-track-lightness: 50%;
   --btn-color: #ADBAC7;
 
-  /* marquee defaults (JS will override) */
-  --marquee-distance: 200px;
+  /* Seamless marquee vars (JS will override) */
+  --marquee-gap: 40px;
+  --marquee-shift: 240px;
   --marquee-duration: 10s;
 }
 
@@ -91,7 +92,7 @@ h1 {
   margin: 0 .5rem .5rem .5rem;
 }
 
-/* ADDED */
+/* Controls row */
 .load-row {
   display: flex;
   gap: 8px;
@@ -148,7 +149,7 @@ h1 {
 }
 
 /* ---------------------------------------
-   NEW: Winamp-style title row + marquee
+   Winamp-style title row + SEAMLESS marquee
    --------------------------------------- */
 .track-row {
   width: 100%;
@@ -175,24 +176,32 @@ h1 {
   font-size: 1.1rem;
 }
 
-/* inner text that will move */
+/* moving belt */
 .track-title-inner {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--marquee-gap);
   will-change: transform;
+}
+
+/* each text copy */
+.track-title-text {
+  display: inline-block;
+  flex: 0 0 auto;
 }
 
 /* Only animate when JS adds .scrolling */
 .track-title-marquee.scrolling .track-title-inner {
-  animation: marquee var(--marquee-duration) linear infinite;
+  animation: marquee-seamless var(--marquee-duration) linear infinite;
 }
 
-@keyframes marquee {
+@keyframes marquee-seamless {
   from {
     transform: translateX(0);
   }
 
   to {
-    transform: translateX(calc(-1 * var(--marquee-distance)));
+    transform: translateX(calc(-1 * var(--marquee-shift)));
   }
 }
 
@@ -206,7 +215,7 @@ h1 {
   /* shown by JS when playing */
 }
 
-/* Keep old track-info-displayer styles (if still used elsewhere) */
+/* Keep old track-info-displayer styles (if still present in HTML elsewhere) */
 .track-info-displayer {
   width: 100%;
   height: 2rem;
@@ -435,7 +444,7 @@ h2 {
   align-items: center;
 }
 
-/* Old visualisation styles kept (if you keep the bottom section) */
+/* Old visualisation styles kept (if you keep the bottom section somewhere) */
 .visualisation {
   height: auto;
   max-height: 420px;

@@ -6,6 +6,7 @@
     <title>WINAMP</title>
     <link rel="stylesheet" href="player.css" />
   </head>
+
   <body>
     <div class="container">
       <div class="maxamp-container">
@@ -29,28 +30,36 @@
               <div class="time-container--left">
                 <div class="time-displayer">00:00</div>
               </div>
+
               <div class="time-container--right">
-  <div class="track-row">
-    <div class="track-title-marquee">
-      <div class="track-title-inner"></div>
-    </div>
+                <!-- Winamp-like title row (seamless marquee + mini viz) -->
+                <div class="track-row">
+                  <div class="track-title-marquee">
+                    <div class="track-title-inner">
+                      <span class="track-title-text"></span>
+                      <span class="track-title-text clone"></span>
+                    </div>
+                  </div>
 
-    <!-- tiny winamp-like viz -->
-    <canvas class="visualisation viz-mini" width="96" height="24"></canvas>
-  </div>
+                  <!-- tiny winamp-like viz -->
+                  <canvas
+                    class="visualisation viz-mini"
+                    width="96"
+                    height="24"
+                  ></canvas>
+                </div>
 
-  <div class="volume">
-    <input
-      class="volume-controller"
-      type="range"
-      min="0"
-      max="100"
-      value="100"
-      step="1"
-    />
-  </div>
+                <div class="volume">
+                  <input
+                    class="volume-controller"
+                    type="range"
+                    min="0"
+                    max="100"
+                    value="100"
+                    step="1"
+                  />
+                </div>
               </div>
-
             </div>
 
             <div class="progress-container">
@@ -96,6 +105,7 @@
             <h2>WINAMP PLAYLIST</h2>
             <div class="line line-other"></div>
           </div>
+
           <div class="playlist">
             <div class="hint">
               Playlist items list is not scraped from YouTube (cross-origin).
@@ -104,6 +114,8 @@
             <div class="now-playing"></div>
           </div>
         </div>
+      </div>
+    </div>
 
     <script src="player.js"></script>
   </body>

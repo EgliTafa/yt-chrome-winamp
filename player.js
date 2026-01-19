@@ -1,17 +1,20 @@
 // player.js - Controls active YouTube player via content script
 
 const qs = document.querySelector.bind(document);
-const trackTitleMarquee = qs(".track-title-marquee");
-const trackTitleInner = qs(".track-title-inner");
-
 const qsall = document.querySelectorAll.bind(document);
 const root = document.documentElement;
 
+// Marquee title elements (Winamp-style)
+const trackTitleMarquee = qs(".track-title-marquee");
+const trackTitleInner = qs(".track-title-inner");
+const trackTitleTextA = qs(".track-title-text");
+const trackTitleTextB = qs(".track-title-text.clone");
+
+// UI elements
 const timeDisplayer = qs(".time-displayer");
-const trackInfoDisplayer = qs(".track-info-displayer");
+const trackInfoDisplayer = qs(".track-info-displayer"); // legacy (kept)
 const volumeController = qs(".volume-controller");
 const progressBar = qs(".progress-bar");
-
 const resizable = qsall(".resizable");
 const navBtns = qsall(".nav-btn");
 
@@ -42,16 +45,15 @@ let vizRaf = null;
 function setCanvasCrispSize() {
   if (!visualisationCanvas || !vizCtx) return;
 
-  // Make canvas crisp in popup (HiDPI)
   const dpr = window.devicePixelRatio || 1;
   const rect = visualisationCanvas.getBoundingClientRect();
 
-  // If canvas is display:none, rect can be 0; fallback to attribute size.
-  const cssW = rect.width || visualisationCanvas.width || 320;
-  const cssH = rect.height || visualisationCanvas.height || 80;
+  // If canvas is display:none, rect can be 0; fallback to attributes
+  const cssW = rect.width || visualisationCanvas.getAttribute("width") || 320;
+  const cssH = rect.height || visualisationCanvas.getAttribute("height") || 80;
 
-  const w = Math.max(1, Math.floor(cssW * dpr));
-  const h = Math.max(1, Math.floor(cssH * dpr));
+  const w = Math.max(1, Math.floor(Number(cssW) * dpr));
+  const h = Math.max(1, Math.floor(Number(cssH) * dpr));
 
   if (visualisationCanvas.width !== w) visualisationCanvas.width = w;
   if (visualisationCanvas.height !== h) visualisationCanvas.height = h;
@@ -66,10 +68,10 @@ function drawViz() {
   setCanvasCrispSize();
 
   const rect = visualisationCanvas.getBoundingClientRect();
-  const W = rect.width || 320;
-  const H = rect.height || 80;
+  const W = rect.width || 96;
+  const H = rect.height || 24;
 
-  // Background (classic black)
+  // Background
   vizCtx.save();
   vizCtx.fillStyle = "#000000";
   vizCtx.fillRect(0, 0, W, H);
@@ -79,21 +81,21 @@ function drawViz() {
     const n = bars.length;
     if (peakBars.length !== n) peakBars = new Array(n).fill(0);
 
-    const gap = 2;
+    const gap = 1; // tiny canvas -> small gap
     const barW = Math.max(1, Math.floor((W - (n - 1) * gap) / n));
 
     for (let i = 0; i < n; i++) {
-      const v = bars[i] / 255;       // 0..1
-      const barH = Math.floor(v * H);
+      const v = bars[i] / 255; // 0..1
+      const barH = Math.max(0, Math.floor(v * H));
       const x = i * (barW + gap);
       const y = H - barH;
 
-      // Green bars
+      // Bars
       vizCtx.fillStyle = "#00ff66";
       vizCtx.fillRect(x, y, barW, barH);
 
-      // Peak hold (small bright line)
-      const nextPeak = Math.max(barH, peakBars[i] - 2); // decay
+      // Peak hold (decay)
+      const nextPeak = Math.max(barH, peakBars[i] - 1);
       peakBars[i] = nextPeak;
 
       vizCtx.fillStyle = "#aaffcc";
@@ -110,7 +112,6 @@ function startViz() {
   vizRunning = true;
   visualisationCanvas.style.display = "block";
   peakBars = [];
-  // Ask content script to start streaming audio bars
   sendCommand("START_VIZ");
   vizRaf = requestAnimationFrame(drawViz);
 }
@@ -119,20 +120,15 @@ function stopViz() {
   if (!visualisationCanvas || !vizRunning) return;
   vizRunning = false;
 
-  // Stop streaming (best-effort)
-  try {
-    sendCommand("STOP_VIZ");
-  } catch (_) { }
+  // best-effort stop
+  try { sendCommand("STOP_VIZ"); } catch (_) { }
 
   if (vizRaf) cancelAnimationFrame(vizRaf);
   vizRaf = null;
   latestVizBars = null;
   peakBars = [];
 
-  // Hide canvas + clear it
-  if (vizCtx) {
-    vizCtx.clearRect(0, 0, visualisationCanvas.width, visualisationCanvas.height);
-  }
+  if (vizCtx) vizCtx.clearRect(0, 0, visualisationCanvas.width, visualisationCanvas.height);
   visualisationCanvas.style.display = "none";
 }
 
@@ -158,6 +154,9 @@ let youtubeTabId = null;
 let updateInterval = null;
 let isConnected = false;
 
+/* ---------------------------
+ *  Status helpers
+ *  --------------------------*/
 function setStatus(t) {
   if (statusText) statusText.textContent = t ?? "";
 }
@@ -169,51 +168,90 @@ function fmtTime(seconds) {
   return `${mm}:${ss}`;
 }
 
-function setTrackTitle(title) {
-  if (!trackTitleInner) return;
-
-  trackTitleInner.textContent = title || "YouTube Player";
-
-  // Let the DOM update, then check overflow
-  requestAnimationFrame(updateMarquee);
-}
-
-function updateMarquee() {
-  if (!trackTitleMarquee || !trackTitleInner) return;
-
-  // Reset
-  trackTitleMarquee.classList.remove("scrolling");
-  trackTitleMarquee.style.removeProperty("--marquee-distance");
-  trackTitleMarquee.style.removeProperty("--marquee-duration");
-  trackTitleInner.style.transform = "translateX(0)";
-
-  const overflow = trackTitleInner.scrollWidth - trackTitleMarquee.clientWidth;
-
-  if (overflow > 8) {
-    const gap = 40;
-    const distance = overflow + gap;
-
-    const pxPerSec = 40;
-    const duration = Math.max(6, distance / pxPerSec);
-
-    trackTitleMarquee.style.setProperty("--marquee-distance", `${distance}px`);
-    trackTitleMarquee.style.setProperty("--marquee-duration", `${duration}s`);
-    trackTitleMarquee.classList.add("scrolling");
-  }
-}
-
-
 function setHighlighted(btn, on) {
   if (!btn) return;
   if (on) btn.classList.add("highlighted");
   else btn.classList.remove("highlighted");
 }
 
+/* ---------------------------
+ *  Winamp-style scrolling title
+ *  --------------------------*/
+// IMPORTANT: avoid restarting animation every second.
+// Only update when title changes, and schedule measurement once per frame burst.
+let lastMarqueeTitle = "";
+let marqueeScheduled = false;
+
+function setTrackTitle(title) {
+  if (!trackTitleMarquee || !trackTitleInner || !trackTitleTextA || !trackTitleTextB) return;
+
+  const next = title || "YouTube Player";
+  if (next === lastMarqueeTitle) return;
+
+  lastMarqueeTitle = next;
+
+  // set BOTH copies
+  trackTitleTextA.textContent = next;
+  trackTitleTextB.textContent = next;
+
+  scheduleMarqueeUpdate();
+}
+
+function scheduleMarqueeUpdate() {
+  if (marqueeScheduled) return;
+  marqueeScheduled = true;
+
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      marqueeScheduled = false;
+      updateMarquee();
+    });
+  });
+}
+
+function updateMarquee() {
+  if (!trackTitleMarquee || !trackTitleInner || !trackTitleTextA) return;
+
+  // stop animation cleanly
+  trackTitleMarquee.classList.remove("scrolling");
+  trackTitleMarquee.style.removeProperty("--marquee-duration");
+  trackTitleMarquee.style.removeProperty("--marquee-shift");
+  trackTitleInner.style.transform = "translateX(0)";
+
+  // force restart capability
+  void trackTitleInner.offsetWidth;
+
+  const containerW = trackTitleMarquee.clientWidth;
+  const textW = trackTitleTextA.scrollWidth;
+
+  // if it fits, don't scroll
+  if (textW <= containerW - 8) return;
+
+  // how far to shift to bring the 2nd copy to where the 1st started
+  const gap = 40;
+  const shift = textW + gap;
+
+  // speed control
+  const pxPerSec = 45;
+  const duration = Math.max(6, shift / pxPerSec);
+
+  trackTitleMarquee.style.setProperty("--marquee-gap", `${gap}px`);
+  trackTitleMarquee.style.setProperty("--marquee-shift", `${shift}px`);
+  trackTitleMarquee.style.setProperty("--marquee-duration", `${duration}s`);
+
+  trackTitleMarquee.classList.add("scrolling");
+}
+
+window.addEventListener("resize", scheduleMarqueeUpdate);
+
+/* ---------------------------
+ *  Reconnect helpers
+ *  --------------------------*/
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 3;
 let reconnectTimeout = null;
 
-/** ---------------------------
+/* ---------------------------
  *  Connect to YouTube tab
  *  --------------------------*/
 async function connectToYouTubeTab() {
@@ -225,6 +263,7 @@ async function connectToYouTubeTab() {
   try {
     console.debug("Looking for YouTube tabs...");
 
+    // Prefer active YouTube tab
     const activeTabs = await chrome.tabs.query({
       url: ["https://www.youtube.com/*", "https://youtube.com/*"],
       active: true,
@@ -233,8 +272,9 @@ async function connectToYouTubeTab() {
 
     if (activeTabs.length > 0) {
       youtubeTabId = activeTabs[0].id;
-      setStatus(`Connecting to your YouTube tab...`);
+      setStatus("Connecting to your YouTube tab...");
     } else {
+      // Any YT tab in current window
       const windowTabs = await chrome.tabs.query({
         url: ["https://www.youtube.com/*", "https://youtube.com/*"],
         currentWindow: true,
@@ -242,15 +282,16 @@ async function connectToYouTubeTab() {
 
       if (windowTabs.length > 0) {
         youtubeTabId = windowTabs[0].id;
-        setStatus(`Connecting to YouTube tab in this window...`);
+        setStatus("Connecting to YouTube tab in this window...");
       } else {
+        // Any YT tab anywhere
         const allTabs = await chrome.tabs.query({
           url: ["https://www.youtube.com/*", "https://youtube.com/*"],
         });
 
         if (allTabs.length > 0) {
           youtubeTabId = allTabs[0].id;
-          setStatus(`Connecting to YouTube tab...`);
+          setStatus("Connecting to YouTube tab...");
         } else {
           setStatus("No YouTube tab found. Open a YouTube video/playlist first.");
           if (nowPlaying) {
@@ -265,6 +306,7 @@ async function connectToYouTubeTab() {
       }
     }
 
+    // Validate tab exists
     try {
       await chrome.tabs.get(youtubeTabId);
     } catch (error) {
@@ -276,7 +318,7 @@ async function connectToYouTubeTab() {
       return;
     }
 
-    // Try inject (safe if already present)
+    // Ensure content script is injected (safe if already injected)
     try {
       await chrome.scripting
         .executeScript({
@@ -286,13 +328,13 @@ async function connectToYouTubeTab() {
         .catch(() => { });
     } catch (_) { }
 
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    // Give it a moment
+    await new Promise((resolve) => setTimeout(resolve, 500));
 
+    // Connect
     contentPort = chrome.tabs.connect(youtubeTabId, { name: "youtube-content" });
 
-    contentPort.onMessage.addListener((msg) => {
-      handleContentMessage(msg);
-    });
+    contentPort.onMessage.addListener((msg) => handleContentMessage(msg));
 
     contentPort.onDisconnect.addListener(() => {
       const wasConnected = isConnected;
@@ -316,6 +358,7 @@ async function connectToYouTubeTab() {
       }
     });
 
+    // Request initial state
     setTimeout(() => {
       try {
         if (contentPort) {
@@ -330,6 +373,7 @@ async function connectToYouTubeTab() {
         isConnected = false;
       }
     }, 200);
+
   } catch (error) {
     console.error("Error in connectToYouTubeTab:", error);
     setStatus(`Error: ${error.message}`);
@@ -345,6 +389,9 @@ async function connectToYouTubeTab() {
   }
 }
 
+/* ---------------------------
+ *  Content messages
+ *  --------------------------*/
 function handleContentMessage(msg) {
   if (!msg || !msg.type) return;
 
@@ -389,12 +436,13 @@ function handlePlayerInfo(info) {
 
   if (typeof info.currentTime === "number") lastCurrentTime = info.currentTime;
   if (typeof info.duration === "number" && info.duration > 0) lastDuration = info.duration;
-  if (typeof info.title === "string" && info.title) lastTitle = info.title;
-  if (typeof info.volume === "number") {
-    if (volumeController) volumeController.value = String(info.volume);
+  if (typeof info.title === "string") lastTitle = info.title || lastTitle;
+
+  if (typeof info.volume === "number" && volumeController) {
+    volumeController.value = String(info.volume);
   }
 
-  // Sync shuffle and loop state from YouTube
+  // Sync shuffle / loop from YouTube
   if (typeof info.shuffle === "boolean") {
     isShuffleOn = info.shuffle;
     setHighlighted(shuffleBtn, isShuffleOn);
@@ -408,9 +456,11 @@ function handlePlayerInfo(info) {
   }
 
   if (timeDisplayer) timeDisplayer.textContent = fmtTime(lastCurrentTime);
-  // if (trackInfoDisplayer) trackInfoDisplayer.textContent = lastTitle ? lastTitle : "YouTube Player";
   setTrackTitle(lastTitle ? lastTitle : "YouTube Player");
-  if (nowPlaying) nowPlaying.textContent = lastTitle ? `Now Playing: ${lastTitle}` : "Now Playing: —";
+
+  if (nowPlaying) {
+    nowPlaying.textContent = lastTitle ? `Now Playing: ${lastTitle}` : "Now Playing: —";
+  }
 
   if (!userDraggingProgress && lastDuration > 0 && progressBar) {
     const frac = Math.max(0, Math.min(1, lastCurrentTime / lastDuration));
@@ -418,7 +468,6 @@ function handlePlayerInfo(info) {
   }
 
   const playerState = info.playerState;
-
   if (playerState === 1) {
     // Playing
     play = true;
@@ -426,19 +475,18 @@ function handlePlayerInfo(info) {
     setHighlighted(playBtn, true);
     setHighlighted(stopBtn, true);
     setHighlighted(pauseBtn, false);
-
-    // ✅ start Winamp viz
     startViz();
   } else if (playerState === 2) {
     // Paused
     pause = true;
     setHighlighted(pauseBtn, true);
-
-    // ✅ stop viz
     stopViz();
   }
 }
 
+/* ---------------------------
+ *  Send command
+ *  --------------------------*/
 function sendCommand(cmd, value) {
   if (!contentPort || !isConnected) {
     setStatus("Not connected to YouTube. Reconnecting...");
@@ -460,6 +508,9 @@ function sendCommand(cmd, value) {
   }
 }
 
+/* ---------------------------
+ *  Update polling
+ *  --------------------------*/
 function startUpdateInterval() {
   if (updateInterval) clearInterval(updateInterval);
   updateInterval = setInterval(() => {
@@ -474,7 +525,7 @@ function stopUpdateInterval() {
   }
 }
 
-/** ---------------------------
+/* ---------------------------
  *  UI Events
  *  --------------------------*/
 if (loadBtn) loadBtn.style.display = "none";
@@ -504,7 +555,6 @@ if (stopBtn) {
 if (pauseBtn) {
   pauseBtn.addEventListener("click", () => {
     if (!play) return;
-
     if (!pause) sendCommand("PAUSE");
     else sendCommand("PLAY");
   });
@@ -593,6 +643,7 @@ if (repeatBtn) {
       return;
     }
 
+    // Cycle: 0->1->2->0
     repeatMode = (repeatMode + 1) % 3;
     setHighlighted(repeatBtn, repeatMode > 0);
 
@@ -610,7 +661,7 @@ if (repeatBtn) {
   });
 }
 
-// Expand/collapse sections
+// Expand/collapse sections (playlist container still exists, visualisation container may not)
 resizable.forEach((resize) => {
   resize.addEventListener("click", () => {
     const container = resize.closest(".playlist-container, .visualisation-container");
@@ -620,14 +671,13 @@ resizable.forEach((resize) => {
     const newHeight = currentHeight === "auto" ? "2rem" : "auto";
     container.style.height = newHeight;
 
-    // If visualisation container collapsed, stop viz
     if (container.classList.contains("visualisation-container") && newHeight === "2rem") {
       stopViz();
     }
   });
 });
 
-// Manual connect button
+// Manual connect
 if (connectBtn) {
   connectBtn.addEventListener("click", () => {
     reconnectAttempts = 0;
