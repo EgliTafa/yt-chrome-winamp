@@ -8,7 +8,7 @@ const timeDisplayer = qs(".time-displayer");
 const trackInfoDisplayer = qs(".track-info-displayer");
 const volumeController = qs(".volume-controller");
 const progressBar = qs(".progress-bar");
-const visualisation = qs(".visualisation");
+
 const resizable = qsall(".resizable");
 const navBtns = qsall(".nav-btn");
 
@@ -25,12 +25,124 @@ const connectBtn = qs(".connect-btn");
 const statusText = qs(".status-text");
 const nowPlaying = qs(".now-playing");
 
+/* ---------------------------
+ *  Visualisation (Winamp-style)
+ *  --------------------------*/
+const visualisationCanvas = qs(".visualisation");
+const vizCtx = visualisationCanvas ? visualisationCanvas.getContext("2d") : null;
+
+let vizRunning = false;
+let latestVizBars = null; // array 0..255
+let peakBars = [];        // peak-hold effect
+let vizRaf = null;
+
+function setCanvasCrispSize() {
+  if (!visualisationCanvas || !vizCtx) return;
+
+  // Make canvas crisp in popup (HiDPI)
+  const dpr = window.devicePixelRatio || 1;
+  const rect = visualisationCanvas.getBoundingClientRect();
+
+  // If canvas is display:none, rect can be 0; fallback to attribute size.
+  const cssW = rect.width || visualisationCanvas.width || 320;
+  const cssH = rect.height || visualisationCanvas.height || 80;
+
+  const w = Math.max(1, Math.floor(cssW * dpr));
+  const h = Math.max(1, Math.floor(cssH * dpr));
+
+  if (visualisationCanvas.width !== w) visualisationCanvas.width = w;
+  if (visualisationCanvas.height !== h) visualisationCanvas.height = h;
+
+  // Draw in CSS pixels
+  vizCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+function drawViz() {
+  if (!vizRunning || !vizCtx || !visualisationCanvas) return;
+
+  setCanvasCrispSize();
+
+  const rect = visualisationCanvas.getBoundingClientRect();
+  const W = rect.width || 320;
+  const H = rect.height || 80;
+
+  // Background (classic black)
+  vizCtx.save();
+  vizCtx.fillStyle = "#000000";
+  vizCtx.fillRect(0, 0, W, H);
+
+  const bars = latestVizBars;
+  if (bars && bars.length) {
+    const n = bars.length;
+    if (peakBars.length !== n) peakBars = new Array(n).fill(0);
+
+    const gap = 2;
+    const barW = Math.max(1, Math.floor((W - (n - 1) * gap) / n));
+
+    for (let i = 0; i < n; i++) {
+      const v = bars[i] / 255;       // 0..1
+      const barH = Math.floor(v * H);
+      const x = i * (barW + gap);
+      const y = H - barH;
+
+      // Green bars
+      vizCtx.fillStyle = "#00ff66";
+      vizCtx.fillRect(x, y, barW, barH);
+
+      // Peak hold (small bright line)
+      const nextPeak = Math.max(barH, peakBars[i] - 2); // decay
+      peakBars[i] = nextPeak;
+
+      vizCtx.fillStyle = "#aaffcc";
+      vizCtx.fillRect(x, H - peakBars[i], barW, 2);
+    }
+  }
+
+  vizCtx.restore();
+  vizRaf = requestAnimationFrame(drawViz);
+}
+
+function startViz() {
+  if (!visualisationCanvas || vizRunning) return;
+  vizRunning = true;
+  visualisationCanvas.style.display = "block";
+  peakBars = [];
+  // Ask content script to start streaming audio bars
+  sendCommand("START_VIZ");
+  vizRaf = requestAnimationFrame(drawViz);
+}
+
+function stopViz() {
+  if (!visualisationCanvas || !vizRunning) return;
+  vizRunning = false;
+
+  // Stop streaming (best-effort)
+  try {
+    sendCommand("STOP_VIZ");
+  } catch (_) {}
+
+  if (vizRaf) cancelAnimationFrame(vizRaf);
+  vizRaf = null;
+  latestVizBars = null;
+  peakBars = [];
+
+  // Hide canvas + clear it
+  if (vizCtx) {
+    vizCtx.clearRect(0, 0, visualisationCanvas.width, visualisationCanvas.height);
+  }
+  visualisationCanvas.style.display = "none";
+}
+
+/* ---------------------------
+ *  Player state
+ *  --------------------------*/
 let play = false;
 let pause = false;
-// ✅ CHANGE #1: shuffle is boolean only
+
+// shuffle boolean only
 let isShuffleOn = false;
 
-// ✅ CHANGE #2: repeat is number only (0=off, 1=playlist, 2=current)
+// repeat numeric only: 0=off, 1=playlist, 2=current
 let repeatMode = 0;
 
 let lastDuration = 0;
@@ -43,9 +155,6 @@ let youtubeTabId = null;
 let updateInterval = null;
 let isConnected = false;
 
-/** ---------------------------
- *  Status helpers
- *  --------------------------*/
 function setStatus(t) {
   if (statusText) statusText.textContent = t ?? "";
 }
@@ -71,7 +180,6 @@ let reconnectTimeout = null;
  *  Connect to YouTube tab
  *  --------------------------*/
 async function connectToYouTubeTab() {
-  // Clear any pending reconnect
   if (reconnectTimeout) {
     clearTimeout(reconnectTimeout);
     reconnectTimeout = null;
@@ -79,62 +187,47 @@ async function connectToYouTubeTab() {
 
   try {
     console.debug("Looking for YouTube tabs...");
-    
-    // First, try to find the currently active/visible YouTube tab (the one user is viewing)
+
     const activeTabs = await chrome.tabs.query({
       url: ["https://www.youtube.com/*", "https://youtube.com/*"],
       active: true,
-      currentWindow: true
+      currentWindow: true,
     });
 
-    console.debug("Active YouTube tabs found:", activeTabs.length);
-
     if (activeTabs.length > 0) {
-      // User is viewing a YouTube tab - connect to it
       youtubeTabId = activeTabs[0].id;
-      console.debug("Connecting to active YouTube tab:", youtubeTabId, activeTabs[0].url);
       setStatus(`Connecting to your YouTube tab...`);
     } else {
-      // No active YouTube tab - check if there's a YouTube tab in the current window
       const windowTabs = await chrome.tabs.query({
         url: ["https://www.youtube.com/*", "https://youtube.com/*"],
-        currentWindow: true
+        currentWindow: true,
       });
 
-      console.debug("YouTube tabs in current window:", windowTabs.length);
-
       if (windowTabs.length > 0) {
-        // Found YouTube tab in current window
         youtubeTabId = windowTabs[0].id;
-        console.debug("Connecting to YouTube tab in window:", youtubeTabId, windowTabs[0].url);
         setStatus(`Connecting to YouTube tab in this window...`);
       } else {
-        // Try all windows as last resort
         const allTabs = await chrome.tabs.query({
-          url: ["https://www.youtube.com/*", "https://youtube.com/*"]
+          url: ["https://www.youtube.com/*", "https://youtube.com/*"],
         });
-
-        console.debug("YouTube tabs in all windows:", allTabs.length);
 
         if (allTabs.length > 0) {
           youtubeTabId = allTabs[0].id;
-          console.debug("Connecting to YouTube tab (any window):", youtubeTabId, allTabs[0].url);
           setStatus(`Connecting to YouTube tab...`);
         } else {
-          // No YouTube tab found at all
-          console.debug("No YouTube tabs found");
           setStatus("No YouTube tab found. Open a YouTube video/playlist first.");
           if (nowPlaying) {
-            nowPlaying.innerHTML = "⚠️ No YouTube tab found<br><small>Open a YouTube video or playlist page first, then open this extension</small>";
+            nowPlaying.innerHTML =
+              "⚠️ No YouTube tab found<br><small>Open a YouTube video or playlist page first, then open this extension</small>";
           }
           isConnected = false;
           reconnectAttempts = 0;
+          stopViz();
           return;
         }
       }
     }
 
-    // Check if tab exists and is accessible
     try {
       await chrome.tabs.get(youtubeTabId);
     } catch (error) {
@@ -142,138 +235,73 @@ async function connectToYouTubeTab() {
       setStatus("YouTube tab not accessible. Please refresh the YouTube page.");
       isConnected = false;
       reconnectAttempts = 0;
+      stopViz();
       return;
     }
 
-    // Ensure content script is injected (in case tab was opened before extension loaded)
+    // Try inject (safe if already present)
     try {
-      await chrome.scripting.executeScript({
-        target: { tabId: youtubeTabId },
-        files: ['content-script.js']
-      }).catch((err) => {
-        // Script might already be injected, that's okay
-        console.debug("Content script injection (may already exist):", err.message);
-      });
-    } catch (error) {
-      console.debug("Could not inject content script:", error);
-    }
+      await chrome.scripting
+        .executeScript({
+          target: { tabId: youtubeTabId },
+          files: ["content-script.js"],
+        })
+        .catch(() => {});
+    } catch (_) {}
 
-    // Wait a bit for content script to be ready (content scripts load at document_idle)
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    await new Promise((resolve) => setTimeout(resolve, 1000));
 
-    console.debug("Attempting to connect to content script on tab:", youtubeTabId);
+    contentPort = chrome.tabs.connect(youtubeTabId, { name: "youtube-content" });
 
-    // Connect to content script with error handling
-    try {
-      contentPort = chrome.tabs.connect(youtubeTabId, { name: "youtube-content" });
+    contentPort.onMessage.addListener((msg) => {
+      handleContentMessage(msg);
+    });
 
-      // Check for runtime errors immediately after connection attempt
-      // Note: lastError is only set if connection fails immediately
-      if (chrome.runtime.lastError) {
-        const errorMsg = chrome.runtime.lastError.message;
-        console.error("Connection error:", errorMsg);
-        // Suppress "Receiving end does not exist" on first attempt - content script might not be ready
-        if (reconnectAttempts === 0 && errorMsg.includes("Receiving end does not exist")) {
-          console.debug("Content script not ready yet, will retry...");
-          reconnectAttempts++;
-          setStatus("Content script loading... retrying...");
-          reconnectTimeout = setTimeout(() => {
-            connectToYouTubeTab();
-          }, 1500);
-          return;
-        }
-        throw new Error(errorMsg);
-      }
-
-      console.debug("Connection established, setting up listeners...");
-
-      contentPort.onMessage.addListener((msg) => {
-        handleContentMessage(msg);
-      });
-
-      contentPort.onDisconnect.addListener(() => {
-        const wasConnected = isConnected;
-        contentPort = null;
-        isConnected = false;
-        
-        // Check if disconnect was due to an error (only log if we were actually connected)
-        if (chrome.runtime.lastError && wasConnected) {
-          const errorMsg = chrome.runtime.lastError.message;
-          // Don't log "Receiving end does not exist" if we weren't connected - it's expected
-          if (!errorMsg.includes("Receiving end does not exist") || wasConnected) {
-            console.error("Connection error:", errorMsg);
-          }
-        }
-        
-        // Only reconnect if we haven't exceeded max attempts
-        if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-          reconnectAttempts++;
-          setStatus(`Disconnected. Reconnecting... (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
-          stopUpdateInterval();
-          reconnectTimeout = setTimeout(() => {
-            connectToYouTubeTab();
-          }, 2000);
-        } else {
-          setStatus("Connection failed. Please refresh the YouTube page and try again.");
-          reconnectAttempts = 0;
-          stopUpdateInterval();
-        }
-      });
-
-      // Request initial state with a small delay to ensure connection is stable
-      setTimeout(() => {
-        try {
-          if (contentPort && chrome.runtime.lastError) {
-            // Connection failed after setup
-            const errorMsg = chrome.runtime.lastError.message;
-            if (!errorMsg.includes("Receiving end does not exist")) {
-              console.error("Connection error after setup:", errorMsg);
-            }
-            contentPort = null;
-            isConnected = false;
-            return;
-          }
-          
-          if (contentPort) {
-            contentPort.postMessage({ type: "GET_STATE" });
-            isConnected = true;
-            reconnectAttempts = 0; // Reset on successful connection
-            setStatus("Connected to YouTube player");
-          }
-        } catch (error) {
-          console.error("Error sending initial message:", error);
-          contentPort = null;
-          isConnected = false;
-        }
-      }, 200);
-
-    } catch (error) {
-      console.error("Error connecting to content script:", error);
+    contentPort.onDisconnect.addListener(() => {
+      const wasConnected = isConnected;
       contentPort = null;
       isConnected = false;
-      
+
+      stopUpdateInterval();
+      stopViz();
+
       if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
         reconnectAttempts++;
-        setStatus(`Connection failed. Retrying... (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
-        reconnectTimeout = setTimeout(() => {
-          connectToYouTubeTab();
-        }, 2000);
+        setStatus(`Disconnected. Reconnecting... (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
+        reconnectTimeout = setTimeout(() => connectToYouTubeTab(), 2000);
       } else {
-        setStatus("Could not connect to YouTube page. Please refresh the YouTube page and reopen this extension.");
+        setStatus("Connection failed. Please refresh the YouTube page and try again.");
         reconnectAttempts = 0;
       }
-    }
 
+      if (chrome.runtime.lastError && wasConnected) {
+        console.debug("Disconnect reason:", chrome.runtime.lastError.message);
+      }
+    });
+
+    setTimeout(() => {
+      try {
+        if (contentPort) {
+          contentPort.postMessage({ type: "GET_STATE" });
+          isConnected = true;
+          reconnectAttempts = 0;
+          setStatus("Connected to YouTube player");
+        }
+      } catch (e) {
+        console.error("Initial GET_STATE failed:", e);
+        contentPort = null;
+        isConnected = false;
+      }
+    }, 200);
   } catch (error) {
     console.error("Error in connectToYouTubeTab:", error);
     setStatus(`Error: ${error.message}`);
     isConnected = false;
-    
+    stopViz();
+
     if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
       reconnectAttempts++;
-      reconnectTimeout = setTimeout(() => {
-        connectToYouTubeTab();
-      }, 2000);
+      reconnectTimeout = setTimeout(() => connectToYouTubeTab(), 2000);
     } else {
       reconnectAttempts = 0;
     }
@@ -290,37 +318,35 @@ function handleContentMessage(msg) {
     case "PLAYER_INFO":
       handlePlayerInfo(msg);
       break;
+    case "AUDIO_DATA":
+      if (Array.isArray(msg.bars)) latestVizBars = msg.bars;
+      break;
   }
 }
 
 function handleYouTubeState(state) {
   if (!state.hasPlayer) {
     setStatus("No video player found on this YouTube page.");
-    if (nowPlaying) {
-      nowPlaying.textContent = "No video player found. Navigate to a video or playlist.";
-    }
+    if (nowPlaying) nowPlaying.textContent = "No video player found. Navigate to a video or playlist.";
+    stopViz();
     return;
   }
 
   if (state.playlistId) {
     setStatus(`Connected to playlist: ${state.playlistId}`);
-    if (nowPlaying) {
-      nowPlaying.textContent = `Connected to playlist: ${state.playlistId}`;
-    }
+    if (nowPlaying) nowPlaying.textContent = `Connected to playlist: ${state.playlistId}`;
   } else if (state.videoId) {
     setStatus(`Connected to video: ${state.videoId}`);
-    if (nowPlaying) {
-      nowPlaying.textContent = `Connected to video: ${state.videoId}`;
-    }
+    if (nowPlaying) nowPlaying.textContent = `Connected to video: ${state.videoId}`;
   }
 
-  // Start monitoring
   startUpdateInterval();
 }
 
 function handlePlayerInfo(info) {
   if (info.error) {
     setStatus(info.error);
+    stopViz();
     return;
   }
 
@@ -333,76 +359,65 @@ function handlePlayerInfo(info) {
 
   // Sync shuffle and loop state from YouTube
   if (typeof info.shuffle === "boolean") {
-    shuffle = info.shuffle;
-    setHighlighted(shuffleBtn, shuffle);
+    isShuffleOn = info.shuffle;
+    setHighlighted(shuffleBtn, isShuffleOn);
   }
   if (typeof info.loop === "number") {
-    // Loop mode: 0 = off, 1 = playlist, 2 = current
-    repeat = info.loop;
-    setHighlighted(repeatBtn, repeat > 0);
+    repeatMode = info.loop; // 0/1/2
+    setHighlighted(repeatBtn, repeatMode > 0);
   } else if (typeof info.loop === "boolean") {
-    // Legacy boolean support
-    repeat = info.loop ? 1 : 0; // Default to playlist mode if enabled
-    setHighlighted(repeatBtn, repeat > 0);
+    repeatMode = info.loop ? 1 : 0;
+    setHighlighted(repeatBtn, repeatMode > 0);
   }
 
-  // Update UI
   if (timeDisplayer) timeDisplayer.textContent = fmtTime(lastCurrentTime);
-
-  if (trackInfoDisplayer) {
-    trackInfoDisplayer.textContent = lastTitle ? lastTitle : "YouTube Player";
-  }
-
-  if (nowPlaying) {
-    nowPlaying.textContent = lastTitle ? `Now Playing: ${lastTitle}` : "Now Playing: —";
-  }
+  if (trackInfoDisplayer) trackInfoDisplayer.textContent = lastTitle ? lastTitle : "YouTube Player";
+  if (nowPlaying) nowPlaying.textContent = lastTitle ? `Now Playing: ${lastTitle}` : "Now Playing: —";
 
   if (!userDraggingProgress && lastDuration > 0 && progressBar) {
     const frac = Math.max(0, Math.min(1, lastCurrentTime / lastDuration));
     progressBar.value = String(frac);
   }
 
-  // Update player state UI
   const playerState = info.playerState;
+
   if (playerState === 1) {
     // Playing
-    console.debug("[VISUALISATION] Player state: PLAYING - showing visualisation");
     play = true;
     pause = false;
     setHighlighted(playBtn, true);
     setHighlighted(stopBtn, true);
     setHighlighted(pauseBtn, false);
-    if (visualisation) visualisation.style.display = "block";
+
+    // ✅ start Winamp viz
+    startViz();
   } else if (playerState === 2) {
     // Paused
-    console.debug("[VISUALISATION] Player state: PAUSED - hiding visualisation");
     pause = true;
     setHighlighted(pauseBtn, true);
-    if (visualisation) visualisation.style.display = "none";
+
+    // ✅ stop viz
+    stopViz();
   }
 }
 
 function sendCommand(cmd, value) {
   if (!contentPort || !isConnected) {
     setStatus("Not connected to YouTube. Reconnecting...");
-    reconnectAttempts = 0; // Reset attempts when user tries to use controls
+    reconnectAttempts = 0;
     connectToYouTubeTab();
     return;
   }
 
   try {
     contentPort.postMessage({ type: cmd, value });
-    
-    // Check for runtime errors after sending
-    if (chrome.runtime.lastError) {
-      throw new Error(chrome.runtime.lastError.message);
-    }
   } catch (error) {
     console.error("Error sending command:", error);
     setStatus(`Error: ${error.message}`);
     contentPort = null;
     isConnected = false;
     reconnectAttempts = 0;
+    stopViz();
     connectToYouTubeTab();
   }
 }
@@ -410,9 +425,7 @@ function sendCommand(cmd, value) {
 function startUpdateInterval() {
   if (updateInterval) clearInterval(updateInterval);
   updateInterval = setInterval(() => {
-    if (isConnected) {
-      sendCommand("GET_STATE");
-    }
+    if (isConnected) sendCommand("GET_STATE");
   }, 1000);
 }
 
@@ -426,24 +439,17 @@ function stopUpdateInterval() {
 /** ---------------------------
  *  UI Events
  *  --------------------------*/
-if (loadBtn) {
-  loadBtn.style.display = "none"; // Hide load button - not needed
-}
-
-if (playlistInput) {
-  playlistInput.style.display = "none"; // Hide input - not needed
-}
+if (loadBtn) loadBtn.style.display = "none";
+if (playlistInput) playlistInput.style.display = "none";
 
 if (playBtn) {
   playBtn.addEventListener("click", () => {
-    console.debug("[VISUALISATION] Play button clicked");
     sendCommand("PLAY");
   });
 }
 
 if (stopBtn) {
   stopBtn.addEventListener("click", () => {
-    console.debug("[VISUALISATION] Stop button clicked");
     sendCommand("STOP");
     play = false;
     pause = false;
@@ -452,28 +458,17 @@ if (stopBtn) {
     setHighlighted(pauseBtn, false);
     if (progressBar) progressBar.value = "0";
     if (timeDisplayer) timeDisplayer.textContent = "00:00";
-    if (visualisation) {
-      visualisation.style.display = "none";
-      console.debug("[VISUALISATION] Display set to none on stop click");
-    }
     stopUpdateInterval();
+    stopViz();
   });
 }
 
 if (pauseBtn) {
   pauseBtn.addEventListener("click", () => {
-    if (!play) {
-      console.debug("[VISUALISATION] Pause button clicked but play is false");
-      return;
-    }
+    if (!play) return;
 
-    if (!pause) {
-      console.debug("[VISUALISATION] Pausing - hiding visualisation");
-      sendCommand("PAUSE");
-    } else {
-      console.debug("[VISUALISATION] Resuming - showing visualisation");
-      sendCommand("PLAY");
-    }
+    if (!pause) sendCommand("PAUSE");
+    else sendCommand("PLAY");
   });
 }
 
@@ -519,13 +514,13 @@ if (progressBar) {
 // Volume
 if (volumeController) {
   const initV = Number(volumeController.value || 0);
-  root.style.setProperty("--volume-track-lightness", (100 - (initV / 2)) + "%");
+  root.style.setProperty("--volume-track-lightness", 100 - initV / 2 + "%");
 
   volumeController.addEventListener("input", (e) => {
     const v = Number(e.target.value || 0);
     sendCommand("VOLUME", v);
 
-    const lightness = (100 - (v / 2)) + "%";
+    const lightness = 100 - v / 2 + "%";
     root.style.setProperty("--volume-track-lightness", lightness);
   });
 }
@@ -560,10 +555,7 @@ if (repeatBtn) {
       return;
     }
 
-    // Cycle through loop modes: Off -> Playlist -> Current -> Off
-    repeatMode = (repeatMode + 1) % 3; // 0->1->2->0
-
-    // Update button highlight (highlighted for any repeat mode)
+    repeatMode = (repeatMode + 1) % 3;
     setHighlighted(repeatBtn, repeatMode > 0);
 
     // If enabling repeat, disable shuffle
@@ -580,34 +572,19 @@ if (repeatBtn) {
   });
 }
 
-// Expand/collapse playlist/visualisation sections
+// Expand/collapse sections
 resizable.forEach((resize) => {
   resize.addEventListener("click", () => {
     const container = resize.closest(".playlist-container, .visualisation-container");
-    if (!container) {
-      console.debug("resizable click: container not found");
-      return;
-    }
+    if (!container) return;
 
-    const isVisualisation = container.classList.contains("visualisation-container");
     const currentHeight = container.style.height;
     const newHeight = currentHeight === "auto" ? "2rem" : "auto";
-
-    console.debug(`[VISUALISATION] Container ${isVisualisation ? "visualisation" : "playlist"} clicked:`, {
-      currentHeight,
-      newHeight,
-      container: container.className
-    });
-
     container.style.height = newHeight;
 
-    if (isVisualisation) {
-      const visualisationImg = container.querySelector(".visualisation");
-      console.debug("[VISUALISATION] Image element:", {
-        found: !!visualisationImg,
-        display: visualisationImg ? window.getComputedStyle(visualisationImg).display : "N/A",
-        src: visualisationImg ? visualisationImg.src : "N/A"
-      });
+    // If visualisation container collapsed, stop viz
+    if (container.classList.contains("visualisation-container") && newHeight === "2rem") {
+      stopViz();
     }
   });
 });
@@ -615,7 +592,7 @@ resizable.forEach((resize) => {
 // Manual connect button
 if (connectBtn) {
   connectBtn.addEventListener("click", () => {
-    reconnectAttempts = 0; // Reset attempts
+    reconnectAttempts = 0;
     if (reconnectTimeout) {
       clearTimeout(reconnectTimeout);
       reconnectTimeout = null;
@@ -625,13 +602,5 @@ if (connectBtn) {
   });
 }
 
-// Initialize connection when page loads
+// Initialize connection
 connectToYouTubeTab();
-
-// Debug: Log visualisation element initialization
-console.debug("[VISUALISATION] Initialization:", {
-  found: !!visualisation,
-  display: visualisation ? window.getComputedStyle(visualisation).display : "N/A",
-  src: visualisation ? visualisation.src : "N/A",
-  container: visualisation ? visualisation.closest(".visualisation-container")?.className : "N/A"
-});

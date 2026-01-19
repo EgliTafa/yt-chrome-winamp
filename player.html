@@ -1,116 +1,115 @@
 <!doctype html>
 <html>
-<head>
-  <meta charset="utf-8" />
-  <meta name="referrer" content="strict-origin-when-cross-origin" />
-  <title>WINAMP</title>
-  <link rel="stylesheet" href="player.css" />
-</head>
-<body>
-  <div class="container">
-    <div class="maxamp-container">
-
-      <!-- first section : commands-->
-      <div class="top-container">
-
-        <div class="title">
-          <div class="line line-first"></div>
-          <h1>WINAMP</h1>
-          <div class="line line-first"></div>
-        </div>
-
-        <div class="cmd-container">
-
-          <!-- Controls row -->
-          <div class="load-row">
-            <button class="connect-btn" title="Connect to YouTube tab">CONNECT</button>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
+    <title>WINAMP</title>
+    <link rel="stylesheet" href="player.css" />
+  </head>
+  <body>
+    <div class="container">
+      <div class="maxamp-container">
+        <!-- first section : commands-->
+        <div class="top-container">
+          <div class="title">
+            <div class="line line-first"></div>
+            <h1>WINAMP</h1>
+            <div class="line line-first"></div>
           </div>
 
-          <div class="time-container">
-            <div class="time-container--left">
-              <div class="time-displayer">00:00</div>
+          <div class="cmd-container">
+            <!-- Controls row -->
+            <div class="load-row">
+              <button class="connect-btn" title="Connect to YouTube tab">
+                CONNECT
+              </button>
             </div>
-            <div class="time-container--right">
-              <div class="track-info-displayer"></div>
-              <div class="volume">
-                <input
-                  class="volume-controller"
-                  type="range"
-                  min="0"
-                  max="100"
-                  value="100"
-                  step="1">
+
+            <div class="time-container">
+              <div class="time-container--left">
+                <div class="time-displayer">00:00</div>
+              </div>
+              <div class="time-container--right">
+                <div class="track-info-displayer"></div>
+                <div class="volume">
+                  <input
+                    class="volume-controller"
+                    type="range"
+                    min="0"
+                    max="100"
+                    value="100"
+                    step="1"
+                  />
+                </div>
               </div>
             </div>
-          </div>
 
-          <div class="progress-container">
-            <input
-              class="progress-bar"
-              type="range"
-              min="0"
-              max="1"
-              value="0"
-              step=".000001">
-          </div>
-
-          <div class="btn-container">
-            <div class="btn-container--1">
-              <button class="nav-btn" data-nav="prev" title="Previous">⏮</button>
-              <button class="play-btn" title="Play">▶</button>
-              <button class="pause-btn" title="Pause">⏸</button>
-              <button class="stop-btn highlighted" title="Stop">⏹</button>
-              <button class="nav-btn" data-nav="next" title="Next">⏭</button>
+            <div class="progress-container">
+              <input
+                class="progress-bar"
+                type="range"
+                min="0"
+                max="1"
+                value="0"
+                step=".000001"
+              />
             </div>
 
-            <div class="btn-container--2">
-              <button class="shuffle-btn" title="Shuffle">SHUFFLE</button>
-              <button class="repeat-btn" title="Repeat">🔁</button>
+            <div class="btn-container">
+              <div class="btn-container--1">
+                <button class="nav-btn" data-nav="prev" title="Previous">
+                  ⏮
+                </button>
+                <button class="play-btn" title="Play">▶</button>
+                <button class="pause-btn" title="Pause">⏸</button>
+                <button class="stop-btn highlighted" title="Stop">⏹</button>
+                <button class="nav-btn" data-nav="next" title="Next">⏭</button>
+              </div>
+
+              <div class="btn-container--2">
+                <button class="shuffle-btn" title="Shuffle">SHUFFLE</button>
+                <button class="repeat-btn" title="Repeat">🔁</button>
+              </div>
+
+              <div class="logo" title="Winamp">⚡</div>
             </div>
 
-            <div class="logo" title="Winamp">⚡</div>
+            <div class="status-bar">
+              <span class="status-text">Idle.</span>
+            </div>
           </div>
+        </div>
 
-          <div class="status-bar">
-            <span class="status-text">Idle.</span>
+        <!-- second section : playlist-->
+        <div class="playlist-container">
+          <div class="title resizable">
+            <div class="line line-other"></div>
+            <h2>WINAMP PLAYLIST</h2>
+            <div class="line line-other"></div>
           </div>
+          <div class="playlist">
+            <div class="hint">
+              Playlist items list is not scraped from YouTube (cross-origin).
+              This area shows now-playing + status.
+            </div>
+            <div class="now-playing"></div>
+          </div>
+        </div>
 
+        <!-- third section : visualisation-->
+        <div class="visualisation-container">
+          <div class="title resizable">
+            <div class="line line-other"></div>
+            <h2>VISUALISATION</h2>
+            <div class="line line-other"></div>
+          </div>
+          <div class="img-container">
+            <canvas class="visualisation" width="320" height="80"></canvas>
+          </div>
         </div>
       </div>
-
-      <!-- second section : playlist-->
-      <div class="playlist-container">
-        <div class="title resizable">
-          <div class="line line-other"></div>
-          <h2>WINAMP PLAYLIST</h2>
-          <div class="line line-other"></div>
-        </div>
-        <div class="playlist">
-          <div class="hint">
-            Playlist items list is not scraped from YouTube (cross-origin). This area shows now-playing + status.
-          </div>
-          <div class="now-playing"></div>
-        </div>
-      </div>
-
-      <!-- third section : visualisation-->
-      <div class="visualisation-container">
-        <div class="title resizable">
-          <div class="line line-other"></div>
-          <h2>VISUALISATION</h2>
-          <div class="line line-other"></div>
-        </div>
-        <div class="img-container">
-          <img
-            src="https://c.tenor.com/BDN0GwbpmcYAAAAC/yas-banana.gif"
-            class="visualisation"
-            alt="visualisation"/>
-        </div>
-      </div>
-
     </div>
-  </div>
 
-  <script src="player.js"></script>
-</body>
+    <script src="player.js"></script>
+  </body>
 </html>
