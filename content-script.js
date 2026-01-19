@@ -14,7 +14,7 @@ let attachedVideoEl = null;
 let vizTimer = null;
 
 const VIZ_FPS_MS = 50;       // ~20 FPS
-const VIZ_BARS_COUNT = 64;   // bars sent to popup
+const VIZ_BARS_COUNT = 24;   // bars sent to popup
 
 function getVideoEl() {
   return document.querySelector("video");

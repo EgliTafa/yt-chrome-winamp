@@ -30,18 +30,27 @@
                 <div class="time-displayer">00:00</div>
               </div>
               <div class="time-container--right">
-                <div class="track-info-displayer"></div>
-                <div class="volume">
-                  <input
-                    class="volume-controller"
-                    type="range"
-                    min="0"
-                    max="100"
-                    value="100"
-                    step="1"
-                  />
-                </div>
+  <div class="track-row">
+    <div class="track-title-marquee">
+      <div class="track-title-inner"></div>
+    </div>
+
+    <!-- tiny winamp-like viz -->
+    <canvas class="visualisation viz-mini" width="96" height="24"></canvas>
+  </div>
+
+  <div class="volume">
+    <input
+      class="volume-controller"
+      type="range"
+      min="0"
+      max="100"
+      value="100"
+      step="1"
+    />
+  </div>
               </div>
+
             </div>
 
             <div class="progress-container">
@@ -95,20 +104,6 @@
             <div class="now-playing"></div>
           </div>
         </div>
-
-        <!-- third section : visualisation-->
-        <div class="visualisation-container">
-          <div class="title resizable">
-            <div class="line line-other"></div>
-            <h2>VISUALISATION</h2>
-            <div class="line line-other"></div>
-          </div>
-          <div class="img-container">
-            <canvas class="visualisation" width="320" height="80"></canvas>
-          </div>
-        </div>
-      </div>
-    </div>
 
     <script src="player.js"></script>
   </body>

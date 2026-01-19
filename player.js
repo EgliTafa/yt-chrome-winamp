@@ -1,6 +1,9 @@
 // player.js - Controls active YouTube player via content script
 
 const qs = document.querySelector.bind(document);
+const trackTitleMarquee = qs(".track-title-marquee");
+const trackTitleInner = qs(".track-title-inner");
+
 const qsall = document.querySelectorAll.bind(document);
 const root = document.documentElement;
 
@@ -119,7 +122,7 @@ function stopViz() {
   // Stop streaming (best-effort)
   try {
     sendCommand("STOP_VIZ");
-  } catch (_) {}
+  } catch (_) { }
 
   if (vizRaf) cancelAnimationFrame(vizRaf);
   vizRaf = null;
@@ -165,6 +168,40 @@ function fmtTime(seconds) {
   const ss = String(s % 60).padStart(2, "0");
   return `${mm}:${ss}`;
 }
+
+function setTrackTitle(title) {
+  if (!trackTitleInner) return;
+
+  trackTitleInner.textContent = title || "YouTube Player";
+
+  // Let the DOM update, then check overflow
+  requestAnimationFrame(updateMarquee);
+}
+
+function updateMarquee() {
+  if (!trackTitleMarquee || !trackTitleInner) return;
+
+  // Reset
+  trackTitleMarquee.classList.remove("scrolling");
+  trackTitleMarquee.style.removeProperty("--marquee-distance");
+  trackTitleMarquee.style.removeProperty("--marquee-duration");
+  trackTitleInner.style.transform = "translateX(0)";
+
+  const overflow = trackTitleInner.scrollWidth - trackTitleMarquee.clientWidth;
+
+  if (overflow > 8) {
+    const gap = 40;
+    const distance = overflow + gap;
+
+    const pxPerSec = 40;
+    const duration = Math.max(6, distance / pxPerSec);
+
+    trackTitleMarquee.style.setProperty("--marquee-distance", `${distance}px`);
+    trackTitleMarquee.style.setProperty("--marquee-duration", `${duration}s`);
+    trackTitleMarquee.classList.add("scrolling");
+  }
+}
+
 
 function setHighlighted(btn, on) {
   if (!btn) return;
@@ -246,8 +283,8 @@ async function connectToYouTubeTab() {
           target: { tabId: youtubeTabId },
           files: ["content-script.js"],
         })
-        .catch(() => {});
-    } catch (_) {}
+        .catch(() => { });
+    } catch (_) { }
 
     await new Promise((resolve) => setTimeout(resolve, 1000));
 
@@ -371,7 +408,8 @@ function handlePlayerInfo(info) {
   }
 
   if (timeDisplayer) timeDisplayer.textContent = fmtTime(lastCurrentTime);
-  if (trackInfoDisplayer) trackInfoDisplayer.textContent = lastTitle ? lastTitle : "YouTube Player";
+  // if (trackInfoDisplayer) trackInfoDisplayer.textContent = lastTitle ? lastTitle : "YouTube Player";
+  setTrackTitle(lastTitle ? lastTitle : "YouTube Player");
   if (nowPlaying) nowPlaying.textContent = lastTitle ? `Now Playing: ${lastTitle}` : "Now Playing: —";
 
   if (!userDraggingProgress && lastDuration > 0 && progressBar) {
