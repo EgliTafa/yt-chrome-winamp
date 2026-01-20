@@ -31,6 +31,7 @@ function setCanvasCrispSize() {
   if (el.visualisationCanvas.width !== w) el.visualisationCanvas.width = w;
   if (el.visualisationCanvas.height !== h) el.visualisationCanvas.height = h;
 
+  // draw in CSS pixels
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 
@@ -49,26 +50,65 @@ function draw() {
 
   const bars = latestBars;
   if (bars && bars.length) {
+    // We'll draw symmetric pairs around the center.
+    // Pair count = floor(n/2). If odd, the "center" bar (last) goes in the middle.
     const n = bars.length;
-    if (peakBars.length !== n) peakBars = new Array(n).fill(0);
+    const pairCount = Math.floor(n / 2);
+    const hasCenterBar = n % 2 === 1;
+
+    // Visual layout:
+    // [left ... center ... right]
+    // totalBarsToDraw = pairCount*2 + (hasCenterBar ? 1 : 0)
+    const total = pairCount * 2 + (hasCenterBar ? 1 : 0);
+
+    if (peakBars.length !== total) peakBars = new Array(total).fill(0);
 
     const gap = 2;
-    const barW = Math.max(1, Math.floor((W - (n - 1) * gap) / n));
+    const barW = Math.max(1, Math.floor((W - (total - 1) * gap) / total));
 
-    for (let i = 0; i < n; i++) {
-      const v = bars[i] / 255;
-      const barH = Math.floor(v * H);
-      const x = i * (barW + gap);
+    // Determine the center bar index in the drawn layout
+    const centerIdx = Math.floor(total / 2);
+
+    // Helper to draw one bar at "drawIndex" using value "v01"
+    function drawOne(drawIndex, v01) {
+      const barH = Math.floor(v01 * H);
+      const x = drawIndex * (barW + gap);
       const y = H - barH;
 
       ctx.fillStyle = "#00ff66";
       ctx.fillRect(x, y, barW, barH);
 
-      const nextPeak = Math.max(barH, peakBars[i] - 1);
-      peakBars[i] = nextPeak;
+      const nextPeak = Math.max(barH, peakBars[drawIndex] - 1);
+      peakBars[drawIndex] = nextPeak;
 
       ctx.fillStyle = "#aaffcc";
-      ctx.fillRect(x, H - peakBars[i], barW, 2);
+      ctx.fillRect(x, H - peakBars[drawIndex], barW, 2);
+    }
+
+    // Draw center bar if odd
+    if (hasCenterBar) {
+      const v = (bars[0] ?? 0) / 255; // pick a stable source for center
+      drawOne(centerIdx, v);
+    }
+
+    // Now fill outwards from the center:
+    // We take pairs from the remaining bars, mapping low->center outward.
+    // Strategy:
+    // - Use bars starting at index (hasCenterBar ? 1 : 0)
+    // - For each "k" from 1..pairCount:
+    //     use a bar value and draw it to center-k (left) and center+k (right)
+    // This yields “middle first” motion.
+    const start = hasCenterBar ? 1 : 0;
+
+    for (let k = 1; k <= pairCount; k++) {
+      const srcIdx = start + (k - 1);
+      const v = (bars[srcIdx] ?? 0) / 255;
+
+      const leftIdx = centerIdx - k;
+      const rightIdx = centerIdx + k;
+
+      if (leftIdx >= 0) drawOne(leftIdx, v);
+      if (rightIdx < total) drawOne(rightIdx, v);
     }
   }
 
@@ -89,7 +129,9 @@ export function stopViz() {
   if (!el.visualisationCanvas || !running) return;
   running = false;
 
-  try { if (send) send("STOP_VIZ"); } catch (_) {}
+  try {
+    if (send) send("STOP_VIZ");
+  } catch (_) {}
 
   if (raf) cancelAnimationFrame(raf);
   raf = null;
