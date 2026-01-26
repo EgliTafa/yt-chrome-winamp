@@ -43,17 +43,17 @@ export function handleContentMessage(msg) {
 export function handleYouTubeState(stateMsg) {
   if (!stateMsg.hasPlayer) {
     setStatus("No video player found on this YouTube page.");
-    if (el.nowPlaying) el.nowPlaying.textContent = "No video player found. Navigate to a video or playlist.";
+    if (el.nowPlaying) el.nowPlaying.textContent = "";
     stopViz();
     return;
   }
 
   if (stateMsg.playlistId) {
     setStatus(`Connected to playlist: ${stateMsg.playlistId}`);
-    if (el.nowPlaying) el.nowPlaying.textContent = `Connected to playlist: ${stateMsg.playlistId}`;
+    if (el.nowPlaying) el.nowPlaying.textContent = "";
   } else if (stateMsg.videoId) {
     setStatus(`Connected to video: ${stateMsg.videoId}`);
-    if (el.nowPlaying) el.nowPlaying.textContent = `Connected to video: ${stateMsg.videoId}`;
+    if (el.nowPlaying) el.nowPlaying.textContent = "";
   }
 
   startUpdateInterval();
@@ -89,7 +89,8 @@ export function handlePlayerInfo(info) {
 
   if (el.timeDisplayer) el.timeDisplayer.textContent = fmtTime(state.lastCurrentTime);
   setTrackTitle(state.lastTitle || "YouTube Player");
-  if (el.nowPlaying) el.nowPlaying.textContent = state.lastTitle ? `Now Playing: ${state.lastTitle}` : "Now Playing: —";
+  // Hide now-playing section to avoid duplication
+  if (el.nowPlaying) el.nowPlaying.textContent = "";
 
   if (!state.userDraggingProgress && state.lastDuration > 0 && el.progressBar) {
     const frac = Math.max(0, Math.min(1, state.lastCurrentTime / state.lastDuration));

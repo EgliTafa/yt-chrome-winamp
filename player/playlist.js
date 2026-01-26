@@ -52,7 +52,10 @@ function renderPlaylist() {
   for (const it of filtered) {
     const row = document.createElement("div");
     row.className = "playlist-item" + (it.isCurrent ? " current" : "");
-    row.textContent = `${it.index}. ${it.title || "—"}`;
+    
+    // Only show number and title, with play icon for current track
+    const playIcon = it.isCurrent ? "► " : "";
+    row.textContent = `${it.index}. ${playIcon}${it.title || "—"}`;
     row.title = it.title || "";
     row.setAttribute("role", "button");
     row.style.userSelect = "none";

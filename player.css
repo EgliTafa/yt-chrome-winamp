@@ -420,6 +420,7 @@ button:after {
 .now-playing {
   font-size: 14px;
   line-height: 1.3;
+  display: none; /* Hide to avoid duplication with playlist items */
 }
 
 h2 {
