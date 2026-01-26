@@ -50,6 +50,16 @@ export async function ensureAudioGraph() {
   return true;
 }
 
+function downsampleToWavePoints(timeData, pointsCount = 96) {
+  const out = new Array(pointsCount).fill(128);
+  const step = Math.floor(timeData.length / pointsCount) || 1;
+
+  for (let i = 0; i < pointsCount; i++) {
+    out[i] = timeData[Math.min(timeData.length - 1, i * step)] ?? 128;
+  }
+  return out;
+}
+
 function downsampleToBars(freqData, barsCount = VIZ_BARS_COUNT) {
   const out = new Array(barsCount).fill(0);
   const binSize = Math.floor(freqData.length / barsCount) || 1;
@@ -77,19 +87,23 @@ export async function startVisualiserStream() {
   if (!ok || !state.analyser) return;
 
   const freq = new Uint8Array(state.analyser.frequencyBinCount);
+  const time = new Uint8Array(state.analyser.fftSize); // time domain
 
   state.vizTimer = setInterval(() => {
     if (state.disabled || !state.port || !state.analyser) return;
 
-    // YouTube SPA can replace <video>, re-wire when needed
     if (state.attachedVideoEl !== getVideoEl()) {
       ensureAudioGraph().catch(() => { });
     }
 
     try {
       state.analyser.getByteFrequencyData(freq);
+      state.analyser.getByteTimeDomainData(time);
+
       const bars = downsampleToBars(freq, VIZ_BARS_COUNT);
-      safePost({ type: "AUDIO_DATA", bars });
+      const wave = downsampleToWavePoints(time, 96);
+
+      safePost({ type: "AUDIO_DATA", bars, wave });
     } catch (e) {
       stopVisualiserStream();
     }

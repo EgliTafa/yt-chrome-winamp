@@ -4,7 +4,7 @@ import { state } from "./state.js";
 import { fmtTime, setHighlighted, setStatus } from "./status.js";
 import { setTrackTitle } from "./marquee.js";
 import { startUpdateInterval } from "./commands.js";
-import { startViz, stopViz, setAudioBars } from "./viz.js";
+import { startViz, stopViz, setAudioBars, setWaveformPoints } from "./viz.js";
 import { setPlaylistItems } from "./playlist.js";
 
 export function handleContentMessage(msg) {
@@ -20,7 +20,8 @@ export function handleContentMessage(msg) {
       break;
 
     case "AUDIO_DATA":
-      setAudioBars(msg.bars);
+      if (msg.bars) setAudioBars(msg.bars);
+      if (msg.wave) setWaveformPoints(msg.wave);
       break;
 
     case "PLAYLIST_ITEMS":

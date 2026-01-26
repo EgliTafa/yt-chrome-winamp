@@ -4,7 +4,7 @@ import { state } from "./state.js";
 import { setStatus, setHighlighted, fmtTime } from "./status.js";
 import { sendCommand, stopUpdateInterval } from "./commands.js";
 import { connectToYouTubeTab } from "./connection.js";
-import { stopViz } from "./viz.js";
+import { stopViz, cycleVizMode, getVizModeName } from "./viz.js";
 import { scheduleUpdate as scheduleMarqueeUpdate } from "./marquee.js";
 import { setResizeFunction } from "./playlist.js";
 
@@ -75,6 +75,13 @@ export function bindUI() {
       state.userDraggingProgress = true;
       updateScrubPreview();
     });
+
+    if (el.visualisationCanvas) {
+      el.visualisationCanvas.addEventListener("click", () => {
+        cycleVizMode();
+        setStatus(`Visualizer: ${getVizModeName()}`);
+      });
+    }
 
     el.progressBar.addEventListener("change", () => {
       state.userDraggingProgress = false;
