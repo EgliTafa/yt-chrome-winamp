@@ -157,25 +157,46 @@ function drawWaveform(points, W, H) {
   const midY = H / 2;
   const stepX = n > 1 ? W / (n - 1) : W;
 
+  // --- Auto-gain: scale small signals up so they are visible ---
+  let maxAbs = 0;
+  for (let i = 0; i < n; i++) {
+    const v = points[i] ?? 128;          // 0..255
+    const norm = (v - 128) / 128;        // -1..1
+    const a = Math.abs(norm);
+    if (a > maxAbs) maxAbs = a;
+  }
+
+  // Avoid crazy amplification + avoid flatline
+  const floor = 0.06;                    // treat anything smaller as "quiet"
+  const effective = Math.max(maxAbs, floor);
+
+  // Target ~90% of available height
+  let gain = 0.9 / effective;            // bigger when quiet
+  gain = Math.min(Math.max(gain, 1), 8); // clamp 1..8
+
+  const amp = (H * 0.45) * gain;
+
   ctx.save();
   ctx.strokeStyle = "#00ff66";
-  ctx.lineWidth = 1;
-
+  ctx.lineWidth = 2;                     // thicker helps at small heights
   ctx.beginPath();
+
   for (let i = 0; i < n; i++) {
-    const v = points[i] ?? 128; // 0..255
-    const norm = (v - 128) / 128; // -1..1
-    const y = midY - norm * (H * 0.45); // keep a bit of padding
+    const v = points[i] ?? 128;
+    const norm = (v - 128) / 128;
+    const y = midY - norm * amp;
     const x = i * stepX;
 
     if (i === 0) ctx.moveTo(x, y);
     else ctx.lineTo(x, y);
   }
+
   ctx.stroke();
 
-  // Optional: center line
-  ctx.strokeStyle = "#0a3";
-  ctx.globalAlpha = 0.35;
+  // center line (subtle)
+  ctx.globalAlpha = 0.25;
+  ctx.strokeStyle = "#aaffcc";
+  ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(0, midY);
   ctx.lineTo(W, midY);
