@@ -35,6 +35,10 @@ async function ensureAudioGraph() {
     analyser = audioCtx.createAnalyser();
     analyser.fftSize = 2048;
     analyser.smoothingTimeConstant = 0.8;
+
+    // Note: connecting analyser to destination is OK for analysis,
+    // but on some pages it can double-route audio if you also connect source to destination.
+    // We do NOT connect source to destination here, only analyser to destination.
     analyser.connect(audioCtx.destination);
   }
 
@@ -48,9 +52,10 @@ async function ensureAudioGraph() {
       sourceNode.connect(analyser);
       attachedVideoEl = video;
     } catch (e) {
-      // Reset graph and retry once
+      // Reset graph and retry once (YouTube can block MediaElementSource sometimes)
       try { stopVisualiserStream(); } catch (_) {}
       try { if (audioCtx) { try { audioCtx.close(); } catch (_) {} } } catch (_) {}
+
       audioCtx = null;
       analyser = null;
       sourceNode = null;
@@ -122,28 +127,30 @@ function stopVisualiserStream() {
  *  Port connection
  *  --------------------------*/
 chrome.runtime.onConnect.addListener((connectedPort) => {
-  if (connectedPort.name === "youtube-content") {
-    console.debug("Content script: Extension connecting...");
-    port = connectedPort;
+  if (connectedPort.name !== "youtube-content") return;
 
-    port.onDisconnect.addListener(() => {
-      port = null;
-      stopVisualiserStream();
-      console.debug("Content script: Extension disconnected");
-    });
+  console.debug("Content script: Extension connecting...");
+  port = connectedPort;
 
-    port.onMessage.addListener((msg) => {
-      if (!msg || !msg.type) return;
-      handleExtensionMessage(msg);
-    });
+  port.onDisconnect.addListener(() => {
+    port = null;
+    stopVisualiserStream();
+    stopPlaylistObserver();
+    console.debug("Content script: Extension disconnected");
+  });
 
-    console.debug("Content script: Extension connected successfully");
+  port.onMessage.addListener((msg) => {
+    if (!msg || !msg.type) return;
+    handleExtensionMessage(msg);
+  });
 
-    detectAndSendState();
-    setTimeout(() => {
-      if (port) sendPlayerInfo();
-    }, 300);
-  }
+  console.debug("Content script: Extension connected successfully");
+
+  detectAndSendState();
+  startPlaylistObserver(); // ✅ only once
+  setTimeout(() => {
+    if (port) sendPlayerInfo();
+  }, 300);
 });
 
 console.debug("Content script loaded and ready for connections");
@@ -175,58 +182,58 @@ function extractVideoIdFromUrl(url) {
   return match ? match[1] : null;
 }
 
-// Handle messages from extension popup
+/* ---------------------------
+ *  Messages from popup
+ *  --------------------------*/
 function handleExtensionMessage(msg) {
   switch (msg.type) {
-    case "PLAY":
-      playVideo();
-      break;
-    case "PAUSE":
-      pauseVideo();
-      break;
-    case "STOP":
-      stopVideo();
-      break;
-    case "NEXT":
-      nextVideo();
-      break;
-    case "PREV":
-      previousVideo();
-      break;
-    case "SEEK":
-      seekTo(msg.value);
-      break;
-    case "VOLUME":
-      setVolume(msg.value);
-      break;
-    case "SHUFFLE":
-      setShuffle(msg.value);
-      break;
+    case "PLAY": playVideo(); break;
+    case "PAUSE": pauseVideo(); break;
+    case "STOP": stopVideo(); break;
+    case "NEXT": nextVideo(); break;
+    case "PREV": previousVideo(); break;
+    case "SEEK": seekTo(msg.value); break;
+    case "VOLUME": setVolume(msg.value); break;
+    case "SHUFFLE": setShuffle(msg.value); break;
+
     case "LOOP":
-      if (typeof msg.value === "number") {
-        setLoop(msg.value); // 0=off, 1=playlist, 2=current
-      } else {
+      if (typeof msg.value === "number") setLoop(msg.value);
+      else {
         const currentMode = getLoopState();
         const nextMode = (currentMode + 1) % 3;
         setLoop(nextMode);
       }
       break;
+
     case "GET_STATE":
       detectAndSendState();
       sendPlayerInfo();
       break;
 
-    // ✅ Visualiser control
-    case "START_VIZ":
-      startVisualiserStream();
+    // Visualiser control
+    case "START_VIZ": startVisualiserStream(); break;
+    case "STOP_VIZ": stopVisualiserStream(); break;
+
+    // Playlist
+    case "GET_PLAYLIST":
+      startPlaylistObserver();
+      sendPlaylistItems(true);
       break;
-    case "STOP_VIZ":
-      stopVisualiserStream();
+
+    case "PLAY_ITEM":
+      playPlaylistItemByVideoId(msg.value?.videoId);
+      setTimeout(() => {
+        detectAndSendState();
+        sendPlayerInfo();
+        sendPlaylistItems(true);
+      }, 800);
       break;
   }
 }
 
-// YouTube player control functions
+/* ---------------------------
+ *  YouTube player control
+ *  --------------------------*/
 function playVideo() {
   const video = document.querySelector("video");
   const playButton =
@@ -308,10 +315,12 @@ function setShuffle(enabled) {
     btn = document.querySelector(s);
     if (btn) break;
   }
-
   if (!btn) return;
 
-  const isActive = btn.classList.contains("ytp-shuffle-button-enabled") || btn.getAttribute("aria-pressed") === "true";
+  const isActive =
+    btn.classList.contains("ytp-shuffle-button-enabled") ||
+    btn.getAttribute("aria-pressed") === "true";
+
   if (enabled !== isActive) {
     btn.click();
     setTimeout(sendPlayerInfo, 300);
@@ -340,16 +349,9 @@ function setLoop(mode) {
   if (currentMode === mode) return;
 
   let clicksNeeded = 0;
-  if (mode === 0) {
-    if (currentMode === 1) clicksNeeded = 2;
-    else if (currentMode === 2) clicksNeeded = 1;
-  } else if (mode === 1) {
-    if (currentMode === 0) clicksNeeded = 1;
-    else if (currentMode === 2) clicksNeeded = 2;
-  } else if (mode === 2) {
-    if (currentMode === 0) clicksNeeded = 2;
-    else if (currentMode === 1) clicksNeeded = 1;
-  }
+  if (mode === 0) clicksNeeded = (currentMode === 1) ? 2 : (currentMode === 2 ? 1 : 0);
+  if (mode === 1) clicksNeeded = (currentMode === 0) ? 1 : (currentMode === 2 ? 2 : 0);
+  if (mode === 2) clicksNeeded = (currentMode === 1) ? 1 : (currentMode === 0 ? 2 : 0);
 
   for (let i = 0; i < clicksNeeded; i++) {
     setTimeout(() => btn.click(), i * 200);
@@ -361,7 +363,12 @@ function getShuffleState() {
   const selectors = [".ytp-shuffle-button", "button[aria-label*='Shuffle']"];
   for (const s of selectors) {
     const btn = document.querySelector(s);
-    if (btn) return btn.classList.contains("ytp-shuffle-button-enabled") || btn.getAttribute("aria-pressed") === "true";
+    if (btn) {
+      return (
+        btn.classList.contains("ytp-shuffle-button-enabled") ||
+        btn.getAttribute("aria-pressed") === "true"
+      );
+    }
   }
   return false;
 }
@@ -384,7 +391,9 @@ function getLoopState() {
   return 0;
 }
 
-// Send player info to extension
+/* ---------------------------
+ *  Send player info to popup
+ *  --------------------------*/
 function sendPlayerInfo() {
   const video = document.querySelector("video");
   if (!video) {
@@ -415,7 +424,9 @@ function sendPlayerInfo() {
   }
 }
 
-// Monitor player state changes
+/* ---------------------------
+ *  Monitoring (SPA-safe)
+ *  --------------------------*/
 function startMonitoring() {
   const video = document.querySelector("video");
   if (!video) {
@@ -434,7 +445,9 @@ function startMonitoring() {
       setTimeout(() => {
         detectAndSendState();
         sendPlayerInfo();
-      }, 1000);
+        // playlist panel often updates too
+        sendPlaylistItems(true);
+      }, 600);
     }
   });
 
@@ -442,7 +455,6 @@ function startMonitoring() {
   sendPlayerInfo();
 }
 
-// Initialize monitoring when page loads
 if (window.location.hostname.includes("youtube.com")) {
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", () => setTimeout(startMonitoring, 1000));
@@ -456,8 +468,157 @@ if (window.location.hostname.includes("youtube.com")) {
     if (window.location.href !== lastUrl) {
       lastUrl = window.location.href;
       detectAndSendState();
+      startPlaylistObserver(); // ✅ reattach on SPA nav
       if (port) setTimeout(sendPlayerInfo, 1000);
       setTimeout(startMonitoring, 1000);
     }
   }, 1000);
+}
+
+/* ---------------------------
+ *  Playlist Handling
+ *  --------------------------*/
+let playlistObserver = null;
+let playlistSendTimer = null;
+let lastPlaylistSig = "";
+let observedRoot = null;
+
+function isCurrentPlaylistNode(node, titleEl) {
+  const ariaCurrent = (titleEl?.getAttribute("aria-current") || "").toLowerCase();
+  // aria-current is often "page" on YouTube, not "true"
+  const ariaCurrentActive = ariaCurrent && ariaCurrent !== "false";
+
+  return (
+    node.hasAttribute("selected") ||
+    node.classList.contains("selected") ||
+    ariaCurrentActive
+  );
+}
+
+function scrapePlaylistItems() {
+  const nodes = Array.from(document.querySelectorAll("ytd-playlist-panel-video-renderer"));
+  if (!nodes.length) return [];
+
+  return nodes.map((node, i) => {
+    const titleEl =
+      node.querySelector("a#video-title") ||
+      node.querySelector("#video-title") ||
+      node.querySelector("a[title]");
+
+    const title = (titleEl?.textContent || titleEl?.getAttribute("title") || "").trim();
+
+    // Prefer attribute when present (often exists)
+    const attrVid = node.getAttribute("video-id");
+
+    // Fallback: parse href
+    const href = titleEl?.getAttribute("href") || "";
+    const params = new URLSearchParams(href.split("?")[1] || "");
+    const urlVid = params.get("v");
+
+    const videoId = attrVid || urlVid || null;
+    const isCurrent = isCurrentPlaylistNode(node, titleEl);
+
+    return {
+      index: i + 1,
+      title,
+      videoId,
+      isCurrent: !!isCurrent,
+    };
+  });
+}
+
+function computeSig(items) {
+  return items.map(x => `${x.videoId || ""}:${x.title}:${x.isCurrent ? 1 : 0}`).join("|");
+}
+
+function sendPlaylistItems(force = false) {
+  if (!port) return;
+
+  const items = scrapePlaylistItems();
+  const sig = computeSig(items);
+
+  if (!force && sig === lastPlaylistSig) return;
+  lastPlaylistSig = sig;
+
+  port.postMessage({ type: "PLAYLIST_ITEMS", items });
+}
+
+function throttledSendPlaylist() {
+  if (playlistSendTimer) return;
+  playlistSendTimer = setTimeout(() => {
+    playlistSendTimer = null;
+    sendPlaylistItems(false);
+  }, 250);
+}
+
+function findPlaylistRootForObserver() {
+  return document.querySelector("ytd-playlist-panel-renderer") || document.body;
+}
+
+function startPlaylistObserver() {
+  const root = findPlaylistRootForObserver();
+  if (playlistObserver && observedRoot === root) {
+    // already observing the right root
+    sendPlaylistItems(true);
+    return;
+  }
+
+  stopPlaylistObserver();
+  observedRoot = root;
+
+  playlistObserver = new MutationObserver(() => {
+    // If SPA swapped the playlist root, reattach
+    const newRoot = findPlaylistRootForObserver();
+    if (newRoot !== observedRoot) {
+      startPlaylistObserver();
+      return;
+    }
+    throttledSendPlaylist();
+  });
+
+  playlistObserver.observe(root, { childList: true, subtree: true, attributes: true });
+
+  // initial push
+  sendPlaylistItems(true);
+}
+
+function stopPlaylistObserver() {
+  if (playlistObserver) playlistObserver.disconnect();
+  playlistObserver = null;
+  observedRoot = null;
+
+  if (playlistSendTimer) clearTimeout(playlistSendTimer);
+  playlistSendTimer = null;
+}
+
+function playPlaylistItemByVideoId(videoId) {
+  if (!videoId) return false;
+
+  const items = Array.from(document.querySelectorAll("ytd-playlist-panel-video-renderer"));
+  for (const node of items) {
+    const a = node.querySelector("a#video-title, #video-title");
+    if (!a) continue;
+
+    const href = a.getAttribute("href") || "";
+    const params = new URLSearchParams(href.split("?")[1] || "");
+    const v = node.getAttribute("video-id") || params.get("v");
+
+    if (v === videoId) {
+      try { a.scrollIntoView({ block: "center" }); } catch (_) {}
+
+      // More reliable than bare a.click() on some layouts
+      a.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+      return true;
+    }
+  }
+
+  // Fallback: navigate to watch URL with same playlist (if any)
+  const urlParams = new URLSearchParams(window.location.search);
+  const list = urlParams.get("list");
+  const target = list
+    ? `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}&list=${encodeURIComponent(list)}`
+    : `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
+
+  window.location.href = target;
+  return true;
 }

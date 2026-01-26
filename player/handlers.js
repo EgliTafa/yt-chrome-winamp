@@ -5,6 +5,7 @@ import { fmtTime, setHighlighted, setStatus } from "./status.js";
 import { setTrackTitle } from "./marquee.js";
 import { startUpdateInterval } from "./commands.js";
 import { startViz, stopViz, setAudioBars } from "./viz.js";
+import { setPlaylistItems } from "./playlist.js"; // ✅ import
 
 export function handleContentMessage(msg) {
   if (!msg?.type) return;
@@ -18,6 +19,9 @@ export function handleContentMessage(msg) {
       break;
     case "AUDIO_DATA":
       setAudioBars(msg.bars);
+      break;
+    case "PLAYLIST_ITEMS":
+      setPlaylistItems(msg.items); // ✅ now defined
       break;
   }
 }
