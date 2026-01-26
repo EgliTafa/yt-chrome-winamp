@@ -3,6 +3,12 @@ import { qs } from "./dom.js";
 import { setStatus } from "./status.js";
 import { sendCommand } from "./commands.js";
 
+// Import resize function (will be defined in events.js)
+let resizeWindowToContent = null;
+export function setResizeFunction(fn) {
+  resizeWindowToContent = fn;
+}
+
 const playlistSearch = qs(".playlist-search");
 const playlistItemsEl = qs(".playlist-items");
 
@@ -17,6 +23,10 @@ export function initPlaylistUI() {
 export function setPlaylistItems(items) {
   playlistItems = Array.isArray(items) ? items : [];
   renderPlaylist();
+  // Resize window after playlist updates
+  if (resizeWindowToContent) {
+    setTimeout(resizeWindowToContent, 50);
+  }
 }
 
 function renderPlaylist() {
