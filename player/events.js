@@ -1,11 +1,39 @@
 // player/events.js
 import { el, root } from "./dom.js";
 import { state } from "./state.js";
-import { setStatus, setHighlighted } from "./status.js";
+import { setStatus, setHighlighted, fmtTime } from "./status.js";
 import { sendCommand, stopUpdateInterval } from "./commands.js";
 import { connectToYouTubeTab } from "./connection.js";
-import { stopViz } from "./viz.js";
+import { stopViz, cycleVizMode, getVizModeName } from "./viz.js";
 import { scheduleUpdate as scheduleMarqueeUpdate } from "./marquee.js";
+import { setResizeFunction } from "./playlist.js";
+
+async function resizeWindowToContent() {
+  try {
+    // Get the current window
+    const windows = await chrome.windows.getAll();
+    const currentWindow = windows.find(w => w.type === "popup" && w.url?.includes("player.html"));
+
+    if (!currentWindow) return;
+
+    // Calculate the new height based on content
+    const container = document.querySelector(".maxamp-container");
+    if (!container) return;
+
+    // Get the actual content height
+    const contentHeight = container.scrollHeight;
+    const padding = 24; // 12px top + 12px bottom
+    const newHeight = contentHeight + padding;
+
+    // Resize the window
+    await chrome.windows.update(currentWindow.id, {
+      height: newHeight,
+      width: currentWindow.width // Keep the same width
+    });
+  } catch (error) {
+    console.error("Failed to resize window:", error);
+  }
+}
 
 export function bindUI() {
   // hide unused
@@ -28,14 +56,51 @@ export function bindUI() {
   });
 
   if (el.progressBar) {
-    el.progressBar.addEventListener("input", () => (state.userDraggingProgress = true));
+    const updateScrubPreview = () => {
+      if (!el.timeDisplayer) return;
+      if (!state.lastDuration || !Number.isFinite(state.lastDuration) || state.lastDuration <= 0) return;
+
+      const fraction = Number(el.progressBar.value || 0);
+      const t = Math.max(0, Math.min(state.lastDuration, state.lastDuration * fraction));
+
+      state.scrubTime = t;
+
+      // Show the scrubbed time while dragging
+      el.timeDisplayer.textContent = fmtTime(t);
+      // Optional: hover tooltip for precise seconds
+      el.timeDisplayer.title = `${t.toFixed(3)}s`;
+    };
+
+    el.progressBar.addEventListener("input", () => {
+      state.userDraggingProgress = true;
+      updateScrubPreview();
+    });
+
+    if (el.visualisationCanvas) {
+      el.visualisationCanvas.addEventListener("click", () => {
+        cycleVizMode();
+        setStatus(`Visualizer: ${getVizModeName()}`);
+      });
+    }
+
     el.progressBar.addEventListener("change", () => {
       state.userDraggingProgress = false;
       if (!state.isConnected || !state.lastDuration) return;
+
       const fraction = Number(el.progressBar.value || 0);
-      sendCommand("SEEK", state.lastDuration * fraction);
+      const t = Math.max(0, Math.min(state.lastDuration, state.lastDuration * fraction));
+
+      state.lastCurrentTime = t;
+      state.scrubTime = null;
+      if (el.timeDisplayer) {
+        el.timeDisplayer.textContent = fmtTime(t);
+        el.timeDisplayer.title = `${t.toFixed(3)}s`;
+      }
+
+      sendCommand("SEEK", t);
     });
   }
+
 
   if (el.volumeController) {
     const initV = Number(el.volumeController.value || 0);
@@ -84,13 +149,30 @@ export function bindUI() {
   }
 
   el.resizable?.forEach((resize) => {
-    resize.addEventListener("click", () => {
+    resize.addEventListener("click", async () => {
       const container = resize.closest(".playlist-container, .visualisation-container");
       if (!container) return;
-      const currentHeight = container.style.height;
-      const newHeight = currentHeight === "auto" ? "2rem" : "auto";
-      container.style.height = newHeight;
-      if (container.classList.contains("visualisation-container") && newHeight === "2rem") stopViz();
+
+      // For playlist container, toggle the playlist content visibility
+      if (container.classList.contains("playlist-container")) {
+        const playlist = container.querySelector(".playlist");
+        const isCollapsed = playlist?.style.display === "none";
+
+        if (playlist) {
+          playlist.style.display = isCollapsed ? "" : "none";
+          container.classList.toggle("collapsed", !isCollapsed);
+        }
+
+        // Resize window automatically
+        await resizeWindowToContent();
+      } else {
+        // For visualisation container, use the old behavior
+        const currentHeight = container.style.height;
+        const newHeight = currentHeight === "auto" ? "2rem" : "auto";
+        container.style.height = newHeight;
+        if (container.classList.contains("visualisation-container") && newHeight === "2rem") stopViz();
+        await resizeWindowToContent();
+      }
     });
   });
 
@@ -107,6 +189,12 @@ export function bindUI() {
   }
 
   window.addEventListener("resize", () => scheduleMarqueeUpdate());
+
+  // Export resize function to playlist module
+  setResizeFunction(resizeWindowToContent);
+
+  // Resize window on initial load
+  setTimeout(resizeWindowToContent, 100);
 }
 
 function onStop() {
@@ -120,6 +208,7 @@ function onStop() {
   if (el.timeDisplayer) el.timeDisplayer.textContent = "00:00";
   stopUpdateInterval();
   stopViz();
+  state.scrubTime = null;
 }
 
 function onPause() {

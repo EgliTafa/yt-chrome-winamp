@@ -3,6 +3,12 @@ import { qs } from "./dom.js";
 import { setStatus } from "./status.js";
 import { sendCommand } from "./commands.js";
 
+// Import resize function (will be defined in events.js)
+let resizeWindowToContent = null;
+export function setResizeFunction(fn) {
+  resizeWindowToContent = fn;
+}
+
 const playlistSearch = qs(".playlist-search");
 const playlistItemsEl = qs(".playlist-items");
 
@@ -17,6 +23,10 @@ export function initPlaylistUI() {
 export function setPlaylistItems(items) {
   playlistItems = Array.isArray(items) ? items : [];
   renderPlaylist();
+  // Resize window after playlist updates
+  if (resizeWindowToContent) {
+    setTimeout(resizeWindowToContent, 50);
+  }
 }
 
 function renderPlaylist() {
@@ -42,7 +52,10 @@ function renderPlaylist() {
   for (const it of filtered) {
     const row = document.createElement("div");
     row.className = "playlist-item" + (it.isCurrent ? " current" : "");
-    row.textContent = `${it.index}. ${it.title || "—"}`;
+    
+    // Only show number and title, with play icon for current track
+    const playIcon = it.isCurrent ? "► " : "";
+    row.textContent = `${it.index}. ${playIcon}${it.title || "—"}`;
     row.title = it.title || "";
     row.setAttribute("role", "button");
     row.style.userSelect = "none";

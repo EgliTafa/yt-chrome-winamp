@@ -13,13 +13,35 @@ export function scrapePlaylistItems() {
   if (!nodes.length) return [];
 
   return nodes.map((node, i) => {
+    // Try to get the title from the title attribute first (cleanest)
     const a =
       node.querySelector("a#video-title") ||
       node.querySelector("a[href*='watch?v=']") ||
       node.querySelector("#video-title"); // fallback
 
-    const title =
-      (a?.getAttribute("title") || a?.textContent || "").trim();
+    let title = "";
+    
+    // Prefer title attribute as it's usually cleaner
+    if (a?.getAttribute("title")) {
+      title = a.getAttribute("title").trim();
+    } else if (a?.textContent) {
+      // If using textContent, we need to clean it more aggressively
+      title = a.textContent.trim();
+    }
+    
+    // Clean title: remove "Now playing", durations, and any duplicate numbers
+    // Remove "Now playing" text (case insensitive)
+    title = title.replace(/now\s+playing\s*/gi, "").trim();
+    // Remove duration patterns like "6:24", "3:50", "1:23:45" (with optional spaces)
+    title = title.replace(/\s*\d{1,2}:\d{2}(?::\d{2})?\s*/g, " ").trim();
+    // Remove duplicate numbers at the start (e.g., "1 1 title" -> "1 title")
+    title = title.replace(/^(\d+)\.?\s+\1\s+/, "").trim();
+    // Remove standalone numbers that might be duplicates (e.g., "1 2 title" -> "title")
+    title = title.replace(/^(\d+)\.?\s+(\d+)\s+/, "").trim();
+    // Remove play icon if present
+    title = title.replace(/^►\s*/, "").trim();
+    // Clean up multiple spaces
+    title = title.replace(/\s+/g, " ").trim();
 
     const href = a?.getAttribute("href") || "";
     const videoId = extractVideoIdFromHref(href);
