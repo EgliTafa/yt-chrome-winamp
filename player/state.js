@@ -20,4 +20,5 @@ export const state = {
   reconnectAttempts: 0,
   MAX_RECONNECT_ATTEMPTS: 3,
   reconnectTimeout: null,
+  scrubTime: null
 };

@@ -87,7 +87,16 @@ export function handlePlayerInfo(info) {
     setHighlighted(el.repeatBtn, state.repeatMode > 0);
   }
 
-  if (el.timeDisplayer) el.timeDisplayer.textContent = fmtTime(state.lastCurrentTime);
+  if (el.timeDisplayer) {
+    const t =
+      state.userDraggingProgress && typeof state.scrubTime === "number"
+        ? state.scrubTime
+        : state.lastCurrentTime;
+
+    el.timeDisplayer.textContent = fmtTime(t);
+    el.timeDisplayer.title = `${t.toFixed(3)}s`;
+  }
+
   setTrackTitle(state.lastTitle || "YouTube Player");
   // Hide now-playing section to avoid duplication
   if (el.nowPlaying) el.nowPlaying.textContent = "";
