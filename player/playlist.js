@@ -44,11 +44,14 @@ function renderPlaylist() {
     row.className = "playlist-item" + (it.isCurrent ? " current" : "");
     row.textContent = `${it.index}. ${it.title || "—"}`;
     row.title = it.title || "";
+    row.setAttribute("role", "button");
+    row.style.userSelect = "none";
 
     row.addEventListener("click", () => {
       if (!it.videoId) return;
+
       sendCommand("PLAY_ITEM", { videoId: it.videoId });
-      setStatus(`Jumping to: ${it.title || it.videoId}`);
+      setStatus(`Jump request: ${it.title || it.videoId}`);
     });
 
     playlistItemsEl.appendChild(row);
