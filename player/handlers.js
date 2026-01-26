@@ -5,7 +5,7 @@ import { fmtTime, setHighlighted, setStatus } from "./status.js";
 import { setTrackTitle } from "./marquee.js";
 import { startUpdateInterval } from "./commands.js";
 import { startViz, stopViz, setAudioBars } from "./viz.js";
-import { setPlaylistItems } from "./playlist.js"; // ✅ import
+import { setPlaylistItems } from "./playlist.js";
 
 export function handleContentMessage(msg) {
   if (!msg?.type) return;
@@ -14,14 +14,28 @@ export function handleContentMessage(msg) {
     case "YOUTUBE_STATE":
       handleYouTubeState(msg);
       break;
+
     case "PLAYER_INFO":
       handlePlayerInfo(msg);
       break;
+
     case "AUDIO_DATA":
       setAudioBars(msg.bars);
       break;
+
     case "PLAYLIST_ITEMS":
-      setPlaylistItems(msg.items); // ✅ now defined
+      setPlaylistItems(msg.items);
+      break;
+
+    case "PLAY_ITEM_ACK":
+      if (msg.ok) {
+        setStatus(`Jumped to: ${msg.videoId}`);
+      } else {
+        setStatus(`Could not jump (not found): ${msg.videoId}`);
+      }
+      break;
+
+    default:
       break;
   }
 }
@@ -82,7 +96,6 @@ export function handlePlayerInfo(info) {
     el.progressBar.value = String(frac);
   }
 
-  // playing / paused
   if (info.playerState === 1) {
     state.play = true;
     state.pause = false;
