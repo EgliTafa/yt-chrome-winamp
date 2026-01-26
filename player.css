@@ -463,3 +463,50 @@ h2 {
     width: calc(100vw - 24px);
   }
 }
+
+.playlist-search{
+  width: 100%;
+  background: black;
+  color: lime;
+  border: 2px inset #555265;
+  padding: 6px 8px;
+  font-size: 13px;
+  outline: none;
+  margin: 8px 0;
+}
+
+.playlist-items{
+  border: 2px inset #555265;
+  background: #000;
+  max-height: 220px;
+  overflow: auto;
+  padding: 6px;
+}
+
+/* clickable rows */
+.playlist-item{
+  padding: 4px 6px;
+  font-size: 13px;
+  line-height: 1.25;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.playlist-item:hover{
+  outline: 1px solid #2b8a2b;
+  background: #081508;
+}
+
+.playlist-item.current{
+  background: #102010;
+  outline: 1px solid #1f6b1f;
+}
+
+.playlist-empty{
+  opacity: 0.85;
+  font-size: 12px;
+  padding: 6px;
+}

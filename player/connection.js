@@ -2,7 +2,7 @@
 import { state } from "./state.js";
 import { setStatus } from "./status.js";
 import { handleContentMessage } from "./handlers.js";
-import { stopUpdateInterval } from "./commands.js";
+import { stopUpdateInterval, sendCommand } from "./commands.js"; 
 import { stopViz } from "./viz.js";
 
 export async function connectToYouTubeTab() {
@@ -53,16 +53,19 @@ export async function connectToYouTubeTab() {
 
     // safe inject
     try {
-      await chrome.scripting.executeScript({
-        target: { tabId: state.youtubeTabId },
-        files: ["content-script.js"],
-      }).catch(() => {});
+      await chrome.scripting
+        .executeScript({
+          target: { tabId: state.youtubeTabId },
+          files: ["content-script.js"],
+        })
+        .catch(() => {});
     } catch (_) {}
 
     await new Promise((r) => setTimeout(r, 800));
 
     state.contentPort = chrome.tabs.connect(state.youtubeTabId, { name: "youtube-content" });
 
+    // ✅ all messages go through handlers.js
     state.contentPort.onMessage.addListener(handleContentMessage);
 
     state.contentPort.onDisconnect.addListener(() => {
@@ -73,7 +76,9 @@ export async function connectToYouTubeTab() {
 
       if (state.reconnectAttempts < state.MAX_RECONNECT_ATTEMPTS) {
         state.reconnectAttempts++;
-        setStatus(`Disconnected. Reconnecting... (${state.reconnectAttempts}/${state.MAX_RECONNECT_ATTEMPTS})`);
+        setStatus(
+          `Disconnected. Reconnecting... (${state.reconnectAttempts}/${state.MAX_RECONNECT_ATTEMPTS})`
+        );
         state.reconnectTimeout = setTimeout(connectToYouTubeTab, 2000);
       } else {
         setStatus("Connection failed. Please refresh the YouTube page and try again.");
@@ -88,6 +93,9 @@ export async function connectToYouTubeTab() {
         state.isConnected = true;
         state.reconnectAttempts = 0;
         setStatus("Connected to YouTube player");
+
+        // ✅ request playlist listing once connected
+        sendCommand("GET_PLAYLIST");
       }
     }, 200);
   } catch (e) {
