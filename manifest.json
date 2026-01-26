@@ -27,5 +27,13 @@
   ],
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'; img-src 'self' https: data:; frame-src https://www.youtube.com https://www.youtube-nocookie.com;"
-  }
+  },
+  "web_accessible_resources": [
+    {
+      "matches": ["https://www.youtube.com/*", "https://youtube.com/*"],
+      "resources": [
+        "content-script/*.js"
+      ]
+    }
+  ]
 }
