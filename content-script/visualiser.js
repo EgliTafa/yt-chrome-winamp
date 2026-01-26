@@ -96,6 +96,12 @@ export async function startVisualiserStream() {
       ensureAudioGraph().catch(() => { });
     }
 
+    if (!state.port) {
+      stopVisualiserStream();
+      cleanupAudio();
+      return;
+    }
+
     try {
       state.analyser.getByteFrequencyData(freq);
       state.analyser.getByteTimeDomainData(time);

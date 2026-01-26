@@ -44,16 +44,22 @@ export function destroy(reason) {
   } catch (_) { }
 }
 
-onConnectHandler = function(connectedPort) {
+onConnectHandler = function (connectedPort) {
   if (state.disabled) return;
   if (connectedPort.name !== "youtube-content") return;
+
+  if (state.port && state.port !== connectedPort) {
+    try { state.port.disconnect(); } catch (_) { }
+  }
 
   state.port = connectedPort;
 
   state.port.onDisconnect.addListener(() => {
     state.port = null;
-    stopVisualiserStream();
-    stopPlaylistObserver();
+
+    try { stopVisualiserStream(); } catch (_) { }
+    try { cleanupAudio(); } catch (_) { }
+    try { stopPlaylistObserver(); } catch (_) { }
   });
 
   state.port.onMessage.addListener((msg) => {
@@ -61,17 +67,14 @@ onConnectHandler = function(connectedPort) {
     handleExtensionMessage(msg);
   });
 
-  // initial handshake
   detectAndSendState();
   setTimeout(sendPlayerInfo, 250);
 
-  // Playlist observer setup (safe)
   ensurePlaylistObserver(false);
   sendPlaylistItems(true);
 };
 
 export function initializeConnection() {
-  // Kill previous instance if we reinject
   const prev = globalThis[INSTANCE_KEY];
   if (prev?.destroy) {
     try { prev.destroy("reinjected"); } catch (_) { }
