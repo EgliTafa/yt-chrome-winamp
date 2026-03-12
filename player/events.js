@@ -10,25 +10,26 @@ import { setResizeFunction } from "./playlist.js";
 
 async function resizeWindowToContent() {
   try {
-    // Get the current window
-    const windows = await chrome.windows.getAll();
-    const currentWindow = windows.find(w => w.type === "popup" && w.url?.includes("player.html"));
+    const currentWindow = await chrome.windows.getCurrent();
+    if (!currentWindow?.id) return;
 
-    if (!currentWindow) return;
-
-    // Calculate the new height based on content
     const container = document.querySelector(".maxamp-container");
     if (!container) return;
 
-    // Get the actual content height
-    const contentHeight = container.scrollHeight;
-    const padding = 24; // 12px top + 12px bottom
-    const newHeight = contentHeight + padding;
+    const outer = document.querySelector(".container");
+    const outerStyle = outer ? getComputedStyle(outer) : null;
+    const verticalPadding = outerStyle
+      ? (parseFloat(outerStyle.paddingTop) || 0) + (parseFloat(outerStyle.paddingBottom) || 0)
+      : 24;
 
-    // Resize the window
+    // Let layout settle before measuring after collapse/expand changes.
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+
+    const contentHeight = Math.ceil(container.getBoundingClientRect().height);
+    const newHeight = Math.max(240, Math.ceil(contentHeight + verticalPadding));
+
     await chrome.windows.update(currentWindow.id, {
-      height: newHeight,
-      width: currentWindow.width // Keep the same width
+      height: newHeight
     });
   } catch (error) {
     console.error("Failed to resize window:", error);
