@@ -22,8 +22,14 @@
         <div class="cmd-container">
           <!-- Controls row -->
           <div class="load-row">
-            <button class="connect-btn" title="Connect to YouTube tab" aria-label="Connect to active YouTube tab">
+            <select class="youtube-tab-selector" aria-label="Choose a YouTube tab">
+              <option value="">Finding YouTube tabs...</option>
+            </select>
+            <button class="connect-btn" title="Connect or switch YouTube tab" aria-label="Connect or switch YouTube tab">
               CONNECT
+            </button>
+            <button class="disconnect-btn" title="Disconnect from YouTube" aria-label="Disconnect from YouTube">
+              DISCONNECT
             </button>
           </div>
 
@@ -91,7 +97,7 @@
 
           <div class="playlist">
             <div class="hint">
-              Playlist is read from the active YouTube tab (playlist panel must be visible).
+              Playlist is read from the selected YouTube tab.
             </div>
 
             <div class="playlist-tools">

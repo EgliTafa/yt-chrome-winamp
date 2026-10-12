@@ -21,3 +21,6 @@ jobs:
 
       - name: Ensure README exists
         run: test -f README.md
+
+      - name: Run unit tests
+        run: npm test

@@ -3,7 +3,11 @@ import { el, root } from "./dom.js";
 import { state } from "./state.js";
 import { setStatus, setHighlighted, fmtTime } from "./status.js";
 import { sendCommand, stopUpdateInterval } from "./commands.js";
-import { connectToYouTubeTab } from "./connection.js";
+import {
+  connectToYouTubeTab,
+  disconnectFromYouTubeTab,
+  listYoutubeTabs,
+} from "./connection.js";
 import { stopViz, cycleVizMode, getVizModeName } from "./viz.js";
 import { scheduleUpdate as scheduleMarqueeUpdate } from "./marquee.js";
 import { setResizeFunction } from "./playlist.js";
@@ -47,6 +51,104 @@ export function setPlaylistCollapsed(collapsed) {
 }
 
 let boundsSaveTimer = null;
+let tabListRefreshTimer = null;
+let tabDiscoveryBound = false;
+
+function getSelectedYoutubeTabId() {
+  const tabId = Number(el.youtubeTabSelector?.value);
+  return Number.isInteger(tabId) && tabId > 0 ? tabId : null;
+}
+
+function formatTabLabel(tab) {
+  const title = String(tab?.title || "YouTube").trim() || "YouTube";
+  const activeMarker = tab.active ? "▶ " : "";
+  return `${activeMarker}${title}`;
+}
+
+export function updateConnectionControls() {
+  const selectedTabId = getSelectedYoutubeTabId();
+  const isSwitch = state.isConnected && selectedTabId !== state.youtubeTabId;
+
+  if (el.connectBtn) {
+    el.connectBtn.textContent = isSwitch
+      ? "SWITCH"
+      : state.isConnected
+        ? "RECONNECT"
+        : "CONNECT";
+    el.connectBtn.disabled = !selectedTabId;
+  }
+
+  if (el.disconnectBtn) {
+    const attemptInProgress = [
+      "connecting",
+      "handshaking",
+      "reconnecting",
+    ].includes(state.connectionPhase);
+    el.disconnectBtn.disabled = !state.isConnected && !attemptInProgress;
+  }
+}
+
+export async function refreshYoutubeTabOptions(preferredSelection = null) {
+  if (!el.youtubeTabSelector) return [];
+
+  const previousSelection = getSelectedYoutubeTabId();
+  const tabs = await listYoutubeTabs();
+  const desiredTabId = preferredSelection ||
+    previousSelection ||
+    state.youtubeTabId ||
+    state.preferredYoutubeTabId ||
+    tabs[0]?.id ||
+    null;
+
+  el.youtubeTabSelector.replaceChildren();
+
+  if (!tabs.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No YouTube tabs found";
+    el.youtubeTabSelector.appendChild(option);
+    el.youtubeTabSelector.disabled = true;
+    updateConnectionControls();
+    return [];
+  }
+
+  el.youtubeTabSelector.disabled = false;
+  for (const tab of tabs) {
+    const option = document.createElement("option");
+    option.value = String(tab.id);
+    option.textContent = formatTabLabel(tab);
+    option.title = tab.url || option.textContent;
+    el.youtubeTabSelector.appendChild(option);
+  }
+
+  const desiredExists = tabs.some((tab) => tab.id === desiredTabId);
+  el.youtubeTabSelector.value = String(
+    desiredExists ? desiredTabId : tabs[0].id
+  );
+  updateConnectionControls();
+  return tabs;
+}
+
+function scheduleTabListRefresh() {
+  if (tabListRefreshTimer) clearTimeout(tabListRefreshTimer);
+  tabListRefreshTimer = setTimeout(() => {
+    tabListRefreshTimer = null;
+    void refreshYoutubeTabOptions();
+  }, 150);
+}
+
+function bindTabDiscovery() {
+  if (tabDiscoveryBound) return;
+  tabDiscoveryBound = true;
+
+  try {
+    chrome.tabs.onCreated.addListener(scheduleTabListRefresh);
+    chrome.tabs.onRemoved.addListener(scheduleTabListRefresh);
+    chrome.tabs.onUpdated.addListener(scheduleTabListRefresh);
+    chrome.tabs.onActivated.addListener(scheduleTabListRefresh);
+  } catch (_) { /* optional in test/mocked environments */ }
+}
+
 function debouncedSaveWindowBounds() {
   if (boundsSaveTimer) clearTimeout(boundsSaveTimer);
   boundsSaveTimer = setTimeout(() => {
@@ -225,17 +327,51 @@ export function bindUI() {
     });
   });
 
-  if (el.connectBtn) {
-    el.connectBtn.addEventListener("click", () => {
-      state.reconnectAttempts = 0;
-      if (state.reconnectTimeout) {
-        clearTimeout(state.reconnectTimeout);
-        state.reconnectTimeout = null;
-      }
-      setStatus("Connecting...");
-      connectToYouTubeTab();
+  if (el.youtubeTabSelector) {
+    el.youtubeTabSelector.addEventListener("focus", () => {
+      void refreshYoutubeTabOptions();
+    });
+    el.youtubeTabSelector.addEventListener("change", () => {
+      const selected = el.youtubeTabSelector.selectedOptions?.[0]?.textContent || "YouTube tab";
+      updateConnectionControls();
+      setStatus(`Selected ${selected}. Press ${el.connectBtn?.textContent || "CONNECT"}.`);
     });
   }
+
+  if (el.connectBtn) {
+    el.connectBtn.addEventListener("click", async () => {
+      const tabId = getSelectedYoutubeTabId();
+      if (!tabId) {
+        setStatus("No YouTube tab selected.");
+        await refreshYoutubeTabOptions();
+        return;
+      }
+
+      const switchingTabs = state.isConnected && tabId !== state.youtubeTabId;
+      setStatus(
+        switchingTabs
+          ? "Switching YouTube tab..."
+          : state.isConnected
+            ? "Reconnecting..."
+            : "Connecting..."
+      );
+      updateConnectionControls();
+      await connectToYouTubeTab({ tabId });
+      await refreshYoutubeTabOptions(tabId);
+      updateConnectionControls();
+    });
+  }
+
+  if (el.disconnectBtn) {
+    el.disconnectBtn.addEventListener("click", () => {
+      disconnectFromYouTubeTab();
+      updateConnectionControls();
+    });
+  }
+
+  bindTabDiscovery();
+  updateConnectionControls();
+  window.addEventListener("maxamp-connection-change", updateConnectionControls);
 
   window.addEventListener("resize", () => scheduleMarqueeUpdate());
 

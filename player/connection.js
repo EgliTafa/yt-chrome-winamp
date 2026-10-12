@@ -2,12 +2,21 @@
 import { state, CONNECTION_PHASES } from "./state.js";
 import { setStatus } from "./status.js";
 import { handleContentMessage } from "./handlers.js";
-import { stopUpdateInterval, sendCommand } from "./commands.js"; 
+import { stopUpdateInterval, sendCommand } from "./commands.js";
 import { stopViz } from "./viz.js";
 import { savePreferredTabId } from "./prefs.js";
 
+const YOUTUBE_URL_PATTERNS = [
+  "https://www.youtube.com/*",
+  "https://youtube.com/*",
+];
+
 const ALLOWED_PHASE_TRANSITIONS = {
-  [CONNECTION_PHASES.DISCONNECTED]: [CONNECTION_PHASES.CONNECTING, CONNECTION_PHASES.FAILED],
+  [CONNECTION_PHASES.DISCONNECTED]: [
+    CONNECTION_PHASES.CONNECTING,
+    CONNECTION_PHASES.RECONNECTING,
+    CONNECTION_PHASES.FAILED,
+  ],
   [CONNECTION_PHASES.CONNECTING]: [
     CONNECTION_PHASES.HANDSHAKING,
     CONNECTION_PHASES.RECONNECTING,
@@ -18,249 +27,418 @@ const ALLOWED_PHASE_TRANSITIONS = {
     CONNECTION_PHASES.CONNECTED,
     CONNECTION_PHASES.RECONNECTING,
     CONNECTION_PHASES.FAILED,
+    CONNECTION_PHASES.DISCONNECTED,
   ],
-  [CONNECTION_PHASES.CONNECTED]: [CONNECTION_PHASES.RECONNECTING, CONNECTION_PHASES.DISCONNECTED],
+  [CONNECTION_PHASES.CONNECTED]: [
+    CONNECTION_PHASES.CONNECTING,
+    CONNECTION_PHASES.RECONNECTING,
+    CONNECTION_PHASES.DISCONNECTED,
+  ],
   [CONNECTION_PHASES.RECONNECTING]: [
     CONNECTION_PHASES.CONNECTING,
+    CONNECTION_PHASES.HANDSHAKING,
     CONNECTION_PHASES.CONNECTED,
     CONNECTION_PHASES.FAILED,
+    CONNECTION_PHASES.DISCONNECTED,
   ],
-  [CONNECTION_PHASES.FAILED]: [CONNECTION_PHASES.CONNECTING, CONNECTION_PHASES.DISCONNECTED],
+  [CONNECTION_PHASES.FAILED]: [
+    CONNECTION_PHASES.CONNECTING,
+    CONNECTION_PHASES.RECONNECTING,
+    CONNECTION_PHASES.DISCONNECTED,
+  ],
 };
+
+let attemptSequence = 0;
+let activeAttempt = null;
+let activePortBinding = null;
 
 function setConnectionPhase(next) {
   const current = state.connectionPhase;
   if (current === next) return;
-  if (!(ALLOWED_PHASE_TRANSITIONS[current] || []).includes(next)) {
-    return;
-  }
+  if (!(ALLOWED_PHASE_TRANSITIONS[current] || []).includes(next)) return;
   state.connectionPhase = next;
+  try {
+    window.dispatchEvent(new CustomEvent("maxamp-connection-change", {
+      detail: { phase: next },
+    }));
+  } catch (_) { }
 }
 
-async function sleep(ms) {
-  await new Promise((r) => setTimeout(r, ms));
+function isYoutubeUrl(url) {
+  return /^https?:\/\/(www\.)?youtube\.com\//i.test(String(url || ""));
 }
 
-async function isContentScriptReady(tabId) {
+function createAbortError() {
+  const error = new Error("Connection attempt cancelled");
+  error.name = "AbortError";
+  return error;
+}
+
+function throwIfCancelled(attempt) {
+  if (
+    !attempt ||
+    attempt.signal.aborted ||
+    state.connectionAttemptToken !== attempt.token
+  ) {
+    throw createAbortError();
+  }
+}
+
+function abortableDelay(ms, attempt) {
+  throwIfCancelled(attempt);
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      attempt.signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+
+    const onAbort = () => {
+      clearTimeout(timeout);
+      reject(createAbortError());
+    };
+
+    attempt.signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+function cancelReconnectTimer() {
+  if (!state.reconnectTimeout) return;
+  clearTimeout(state.reconnectTimeout);
+  state.reconnectTimeout = null;
+}
+
+function beginConnectionAttempt() {
+  cancelReconnectTimer();
+  activeAttempt?.controller.abort();
+
+  const controller = new AbortController();
+  const token = ++attemptSequence;
+  state.connectionAttemptToken = token;
+  activeAttempt = { token, controller, signal: controller.signal };
+  return activeAttempt;
+}
+
+function cancelActiveAttempt() {
+  activeAttempt?.controller.abort();
+  activeAttempt = null;
+  state.connectionAttemptToken = ++attemptSequence;
+}
+
+function disconnectPort(port) {
+  if (!port) return;
+  try { port.disconnect(); } catch (_) { }
+}
+
+function disposeContentPort() {
+  const binding = activePortBinding;
+  activePortBinding = null;
+
+  if (binding) {
+    try { binding.port.onMessage.removeListener(binding.onMessage); } catch (_) { }
+    try { binding.port.onDisconnect.removeListener(binding.onDisconnect); } catch (_) { }
+  }
+
+  const port = binding?.port || state.contentPort;
+  state.contentPort = null;
+  disconnectPort(port);
+}
+
+function resetConnectedState() {
+  state.isConnected = false;
+  stopUpdateInterval();
+  stopViz();
+}
+
+async function getYoutubeTab(tabId) {
+  if (!Number.isInteger(tabId) || tabId <= 0) return null;
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    return isYoutubeUrl(tab?.url) ? tab : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+export async function listYoutubeTabs() {
+  try {
+    const tabs = await chrome.tabs.query({ url: YOUTUBE_URL_PATTERNS });
+    return tabs
+      .filter((tab) => Number.isInteger(tab?.id) && isYoutubeUrl(tab?.url))
+      .sort((a, b) => {
+        if (!!a.active !== !!b.active) return a.active ? -1 : 1;
+        return Number(b.lastAccessed || 0) - Number(a.lastAccessed || 0);
+      });
+  } catch (_) {
+    return [];
+  }
+}
+
+async function resolveYoutubeTab(explicitTabId, attempt) {
+  if (Number.isInteger(explicitTabId) && explicitTabId > 0) {
+    const explicitTab = await getYoutubeTab(explicitTabId);
+    throwIfCancelled(attempt);
+    return explicitTab;
+  }
+
+  const preferredTab = await getYoutubeTab(state.preferredYoutubeTabId);
+  throwIfCancelled(attempt);
+  if (preferredTab) {
+    setStatus("Connecting to your last YouTube tab...");
+    return preferredTab;
+  }
+
+  const tabs = await listYoutubeTabs();
+  throwIfCancelled(attempt);
+  if (!tabs.length) return null;
+
+  setStatus("Connecting to YouTube tab...");
+  return tabs[0];
+}
+
+async function isContentScriptReady(tabId, attempt) {
+  throwIfCancelled(attempt);
   try {
     const result = await chrome.scripting.executeScript({
       target: { tabId },
       func: () => Boolean(globalThis.__MAXAMP_CONTENT_SCRIPT_INSTANCE__),
     });
+    throwIfCancelled(attempt);
     return Boolean(result?.[0]?.result);
-  } catch (_) {
+  } catch (error) {
+    if (error?.name === "AbortError") throw error;
     return false;
   }
 }
 
-async function ensureContentScriptReady(tabId) {
+async function ensureContentScriptReady(tabId, attempt) {
   const maxAttempts = 5;
 
   for (let i = 0; i < maxAttempts; i++) {
-    if (await isContentScriptReady(tabId)) return true;
+    if (await isContentScriptReady(tabId, attempt)) return true;
+    throwIfCancelled(attempt);
 
     try {
       await chrome.scripting.executeScript({
         target: { tabId },
         files: ["content-script.js"],
       });
-    } catch (_) {}
+    } catch (_) { }
 
-    await sleep(250);
+    await abortableDelay(250, attempt);
   }
 
-  return isContentScriptReady(tabId);
+  return isContentScriptReady(tabId, attempt);
 }
 
-async function tryGetPreferredYoutubeTabId() {
-  const preferred = state.preferredYoutubeTabId;
-  if (!Number.isInteger(preferred) || preferred <= 0) return null;
-  try {
-    const tab = await chrome.tabs.get(preferred);
-    const url = tab?.url || "";
-    if (!/https?:\/\/(www\.)?youtube\.com\//i.test(url)) return null;
-    return tab.id;
-  } catch (_) {
-    return null;
-  }
+function handshakePort(port, attempt) {
+  return new Promise((resolve) => {
+    let settled = false;
+
+    const finish = (ok) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      attempt.signal.removeEventListener("abort", onAbort);
+      try { port.onMessage.removeListener(onMessage); } catch (_) { }
+      try { port.onDisconnect.removeListener(onDisconnect); } catch (_) { }
+      resolve(ok);
+    };
+
+    const onMessage = (message) => {
+      if (attempt.signal.aborted || state.connectionAttemptToken !== attempt.token) {
+        finish(false);
+        return;
+      }
+
+      handleContentMessage(message);
+      if (message?.type === "YOUTUBE_STATE" || message?.type === "PLAYER_INFO") {
+        finish(true);
+      }
+    };
+
+    const onDisconnect = () => {
+      void chrome.runtime?.lastError;
+      finish(false);
+    };
+
+    const onAbort = () => {
+      finish(false);
+      disconnectPort(port);
+    };
+
+    const timeout = setTimeout(() => finish(false), 1200);
+    attempt.signal.addEventListener("abort", onAbort, { once: true });
+    port.onMessage.addListener(onMessage);
+    port.onDisconnect.addListener(onDisconnect);
+
+    try {
+      port.postMessage({ type: "GET_STATE" });
+    } catch (_) {
+      finish(false);
+    }
+  });
 }
 
-async function resolveYoutubeTabId() {
-  const preferredId = await tryGetPreferredYoutubeTabId();
-  if (preferredId != null) {
-    setStatus("Connecting to your last YouTube tab...");
-    return preferredId;
-  }
-
-  const activeTabs = await chrome.tabs.query({
-    url: ["https://www.youtube.com/*", "https://youtube.com/*"],
-    active: true,
-    currentWindow: true,
-  });
-
-  if (activeTabs.length > 0) {
-    setStatus("Connecting to your YouTube tab...");
-    return activeTabs[0].id;
-  }
-
-  const windowTabs = await chrome.tabs.query({
-    url: ["https://www.youtube.com/*", "https://youtube.com/*"],
-    currentWindow: true,
-  });
-
-  if (windowTabs.length > 0) {
-    setStatus("Connecting to YouTube tab in this window...");
-    return windowTabs[0].id;
-  }
-
-  const allTabs = await chrome.tabs.query({
-    url: ["https://www.youtube.com/*", "https://youtube.com/*"],
-  });
-
-  if (allTabs.length === 0) return null;
-
-  setStatus("Connecting to YouTube tab...");
-  return allTabs[0].id;
-}
-
-async function establishPortWithHandshake(tabId) {
+async function establishPortWithHandshake(tabId, attempt) {
   const maxAttempts = 4;
 
   for (let i = 0; i < maxAttempts; i++) {
+    throwIfCancelled(attempt);
     setConnectionPhase(CONNECTION_PHASES.HANDSHAKING);
-    const port = chrome.tabs.connect(tabId, { name: "youtube-content" });
-    let handshakeResolved = false;
 
-    const handshakeOk = await new Promise((resolve) => {
-      const timeout = setTimeout(() => {
-        cleanup(false);
-      }, 1200);
+    let port;
+    try {
+      port = chrome.tabs.connect(tabId, { name: "youtube-content" });
+    } catch (_) {
+      port = null;
+    }
 
-      const onMessage = (msg) => {
-        handleContentMessage(msg);
-        if (!msg?.type || handshakeResolved) return;
-        if (msg.type === "YOUTUBE_STATE" || msg.type === "PLAYER_INFO") {
-          cleanup(true);
-        }
-      };
+    if (port && await handshakePort(port, attempt)) {
+      throwIfCancelled(attempt);
+      return port;
+    }
 
-      const onDisconnect = () => {
-        // Consume runtime.lastError to avoid noisy unchecked disconnect logs.
-        void chrome.runtime.lastError;
-        cleanup(false);
-      };
-
-      function cleanup(ok) {
-        if (handshakeResolved) return;
-        handshakeResolved = true;
-        clearTimeout(timeout);
-        try { port.onMessage.removeListener(onMessage); } catch (_) {}
-        try { port.onDisconnect.removeListener(onDisconnect); } catch (_) {}
-        resolve(ok);
-      }
-
-      port.onMessage.addListener(onMessage);
-      port.onDisconnect.addListener(onDisconnect);
-
-      try {
-        port.postMessage({ type: "GET_STATE" });
-      } catch (_) {
-        cleanup(false);
-      }
-    });
-
-    if (handshakeOk) return port;
-
-    try { port.disconnect(); } catch (_) {}
-    await sleep(250);
+    disconnectPort(port);
+    await abortableDelay(250, attempt);
   }
 
   return null;
 }
 
-export async function connectToYouTubeTab() {
-  if (state.reconnectTimeout) {
-    clearTimeout(state.reconnectTimeout);
-    state.reconnectTimeout = null;
+function finishReconnectFailure() {
+  cancelReconnectTimer();
+  setConnectionPhase(CONNECTION_PHASES.FAILED);
+  setStatus("Connection failed. Refresh the YouTube page or select another tab.");
+  state.reconnectAttempts = 0;
+}
+
+function scheduleReconnect(tabId) {
+  if (state.userDisconnected) return;
+
+  if (state.reconnectAttempts >= state.MAX_RECONNECT_ATTEMPTS) {
+    finishReconnectFailure();
+    return;
   }
 
-  try {
-    setConnectionPhase(
-      state.reconnectAttempts > 0
-        ? CONNECTION_PHASES.RECONNECTING
-        : CONNECTION_PHASES.CONNECTING
-    );
+  state.reconnectAttempts++;
+  setConnectionPhase(CONNECTION_PHASES.RECONNECTING);
+  setStatus(
+    `Disconnected. Reconnecting... (${state.reconnectAttempts}/${state.MAX_RECONNECT_ATTEMPTS})`
+  );
 
-    const tabId = await resolveYoutubeTabId();
-    if (tabId == null) {
-      setStatus("No YouTube tab found. Open a YouTube video/playlist first.");
-      state.isConnected = false;
+  cancelReconnectTimer();
+  state.reconnectTimeout = setTimeout(() => {
+    state.reconnectTimeout = null;
+    if (state.userDisconnected) return;
+    void connectToYouTubeTab({ tabId, retry: true });
+  }, 2000);
+}
+
+function bindActivePort(port, tabId) {
+  const onMessage = (message) => handleContentMessage(message);
+  const onDisconnect = () => {
+    void chrome.runtime?.lastError;
+
+    if (state.contentPort !== port) return;
+    try { port.onMessage.removeListener(onMessage); } catch (_) { }
+    try { port.onDisconnect.removeListener(onDisconnect); } catch (_) { }
+    activePortBinding = null;
+    state.contentPort = null;
+    resetConnectedState();
+
+    if (state.userDisconnected) {
       setConnectionPhase(CONNECTION_PHASES.DISCONNECTED);
-      state.reconnectAttempts = 0;
-      stopUpdateInterval();
-      stopViz();
       return;
     }
-    state.youtubeTabId = tabId;
 
-    await chrome.tabs.get(state.youtubeTabId);
+    scheduleReconnect(tabId);
+  };
 
-    const ready = await ensureContentScriptReady(state.youtubeTabId);
-    if (!ready) {
-      throw new Error("Content script is not ready on this YouTube tab");
+  activePortBinding = { port, onMessage, onDisconnect };
+  state.contentPort = port;
+  port.onMessage.addListener(onMessage);
+  port.onDisconnect.addListener(onDisconnect);
+}
+
+export function disconnectFromYouTubeTab() {
+  state.userDisconnected = true;
+  cancelReconnectTimer();
+  cancelActiveAttempt();
+  disposeContentPort();
+  resetConnectedState();
+  state.youtubeTabId = null;
+  state.reconnectAttempts = 0;
+  setConnectionPhase(CONNECTION_PHASES.DISCONNECTED);
+  setStatus("Disconnected from YouTube.");
+}
+
+export async function connectToYouTubeTab(options = {}) {
+  const normalized = Number.isInteger(options)
+    ? { tabId: options, retry: false }
+    : options || {};
+  const explicitTabId = Number(normalized.tabId) || null;
+  const isRetry = normalized.retry === true;
+
+  state.userDisconnected = false;
+  if (!isRetry) state.reconnectAttempts = 0;
+
+  const attempt = beginConnectionAttempt();
+  disposeContentPort();
+  resetConnectedState();
+  setConnectionPhase(CONNECTION_PHASES.DISCONNECTED);
+  setConnectionPhase(
+    isRetry ? CONNECTION_PHASES.RECONNECTING : CONNECTION_PHASES.CONNECTING
+  );
+
+  let targetTabId = explicitTabId;
+
+  try {
+    const tab = await resolveYoutubeTab(explicitTabId, attempt);
+    throwIfCancelled(attempt);
+
+    if (!tab) {
+      setStatus(
+        explicitTabId
+          ? "The selected YouTube tab is no longer available."
+          : "No YouTube tab found. Open a YouTube video or playlist first."
+      );
+      activeAttempt = null;
+      state.reconnectAttempts = 0;
+      setConnectionPhase(CONNECTION_PHASES.DISCONNECTED);
+      return false;
     }
 
-    state.contentPort = await establishPortWithHandshake(state.youtubeTabId);
-    if (!state.contentPort) {
-      throw new Error("Unable to establish connection with content script");
-    }
+    targetTabId = tab.id;
+    state.youtubeTabId = targetTabId;
 
-    // ✅ all messages go through handlers.js
-    state.contentPort.onMessage.addListener(handleContentMessage);
+    const ready = await ensureContentScriptReady(targetTabId, attempt);
+    throwIfCancelled(attempt);
+    if (!ready) throw new Error("Content script is not ready on this YouTube tab");
 
-    state.contentPort.onDisconnect.addListener(() => {
-      // Consume runtime.lastError so Chrome does not report it as unchecked.
-      void chrome.runtime.lastError;
-      state.contentPort = null;
-      state.isConnected = false;
-      setConnectionPhase(CONNECTION_PHASES.RECONNECTING);
-      stopUpdateInterval();
-      stopViz();
+    const port = await establishPortWithHandshake(targetTabId, attempt);
+    throwIfCancelled(attempt);
+    if (!port) throw new Error("Unable to establish connection with content script");
 
-      if (state.reconnectAttempts < state.MAX_RECONNECT_ATTEMPTS) {
-        state.reconnectAttempts++;
-        setStatus(
-          `Disconnected. Reconnecting... (${state.reconnectAttempts}/${state.MAX_RECONNECT_ATTEMPTS})`
-        );
-        state.reconnectTimeout = setTimeout(connectToYouTubeTab, 2000);
-      } else {
-        setConnectionPhase(CONNECTION_PHASES.FAILED);
-        setStatus("Connection failed. Please refresh the YouTube page and try again.");
-        state.reconnectAttempts = 0;
-      }
-    });
-
+    bindActivePort(port, targetTabId);
     state.isConnected = true;
     setConnectionPhase(CONNECTION_PHASES.CONNECTED);
     state.reconnectAttempts = 0;
-    setStatus("Connected to YouTube player");
-    savePreferredTabId(state.youtubeTabId);
+    activeAttempt = null;
+
+    setStatus(`Connected to ${tab.title || "YouTube player"}`);
+    savePreferredTabId(targetTabId);
     sendCommand("VOLUME", state.volume);
     sendCommand("GET_STATE");
     sendCommand("GET_PLAYLIST");
-  } catch (e) {
-    setStatus(`Error: ${e.message}`);
-    state.isConnected = false;
-    stopUpdateInterval();
-    stopViz();
+    return true;
+  } catch (error) {
+    if (error?.name === "AbortError") return false;
+    if (state.connectionAttemptToken !== attempt.token) return false;
 
-    if (state.reconnectAttempts < state.MAX_RECONNECT_ATTEMPTS) {
-      setConnectionPhase(CONNECTION_PHASES.RECONNECTING);
-      state.reconnectAttempts++;
-      state.reconnectTimeout = setTimeout(connectToYouTubeTab, 2000);
-    } else {
-      setConnectionPhase(CONNECTION_PHASES.FAILED);
-      state.reconnectAttempts = 0;
-    }
+    activeAttempt = null;
+    resetConnectedState();
+    setStatus(`Error: ${error?.message || "Connection failed"}`);
+    scheduleReconnect(targetTabId);
+    return false;
   }
 }

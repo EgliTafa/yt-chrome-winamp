@@ -1,0 +1,8 @@
+{
+  "name": "yt-chrome-winamp",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}

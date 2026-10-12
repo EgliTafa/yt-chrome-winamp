@@ -1,5 +1,9 @@
 // player.js (main)
-import { bindUI } from "./player/events.js";
+import {
+  bindUI,
+  refreshYoutubeTabOptions,
+  updateConnectionControls,
+} from "./player/events.js";
 import { connectToYouTubeTab } from "./player/connection.js";
 import { initViz } from "./player/viz.js";
 import { sendCommand } from "./player/commands.js";
@@ -12,7 +16,11 @@ async function main() {
   initViz({ sendCommand });
   initPlaylistUI();
   startPrefsPersistence();
-  connectToYouTubeTab();
+  await refreshYoutubeTabOptions();
+  void connectToYouTubeTab().finally(async () => {
+    await refreshYoutubeTabOptions();
+    updateConnectionControls();
+  });
 }
 
 main();

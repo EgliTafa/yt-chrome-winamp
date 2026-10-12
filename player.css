@@ -103,18 +103,39 @@ h1 {
 /* Controls row */
 .load-row {
   display: flex;
+  align-items: center;
   gap: 8px;
   margin-bottom: 10px;
 }
 
-.connect-btn {
-  width: 7rem;        /* match shuffle button width */
-  min-width: 7.25rem; /* ensures CONNECT never truncates */
+.youtube-tab-selector {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 2rem;
+  padding: 0 6px;
+  color: lime;
+  background: black;
+  border: 2px inset #555265;
+  font-size: 12px;
+}
+
+.connect-btn,
+.disconnect-btn {
+  width: 7.5rem;
+  min-width: 7.5rem;
+  font-size: .85rem;
   letter-spacing: 0.08em;
 }
 
-.connect-btn:after {
+.connect-btn:after,
+.disconnect-btn:after {
   width: 100%;
+}
+
+.disconnect-btn:disabled,
+.connect-btn:disabled {
+  cursor: default;
+  opacity: .55;
 }
 
 .playlist-input {
@@ -379,7 +400,8 @@ button:active:after {
 
 button:focus-visible,
 .playlist-item:focus-visible,
-input:focus-visible {
+input:focus-visible,
+select:focus-visible {
   outline: 2px solid #2b8a2b;
   outline-offset: 2px;
 }

@@ -30,6 +30,8 @@ export const state = {
   reconnectAttempts: 0,
   MAX_RECONNECT_ATTEMPTS: 3,
   reconnectTimeout: null,
+  connectionAttemptToken: 0,
+  userDisconnected: false,
   scrubTime: null,
 
   volume: 100,

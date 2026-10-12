@@ -21,7 +21,9 @@ export const el = {
   shuffleBtn: qs(".shuffle-btn"),
   repeatBtn: qs(".repeat-btn"),
 
+  youtubeTabSelector: qs(".youtube-tab-selector"),
   connectBtn: qs(".connect-btn"),
+  disconnectBtn: qs(".disconnect-btn"),
   statusText: qs(".status-text"),
   nowPlaying: qs(".now-playing"),
 
