@@ -8,6 +8,14 @@ import { applyVolumeToVideo, scheduleVolumeSync } from "./volume-sync.js";
 function onTimeUpdate() { sendPlayerInfo(); }
 function onPlay() { sendPlayerInfo(); }
 function onPause() { sendPlayerInfo(); }
+function onVolumeChange() {
+  const video = state.monitoringVideo;
+  if (video) {
+    state.volume = Math.round(video.volume * 100);
+    state.muted = !!video.muted;
+  }
+  sendPlayerInfo();
+}
 
 export function startMonitoring() {
   if (state.disabled) return;
@@ -26,6 +34,7 @@ export function startMonitoring() {
     video.addEventListener("timeupdate", onTimeUpdate);
     video.addEventListener("play", onPlay);
     video.addEventListener("pause", onPause);
+    video.addEventListener("volumechange", onVolumeChange);
   } else if (state.currentVideoId !== state.lastVolumeSyncedVideoId) {
     scheduleVolumeSync();
   }
@@ -39,6 +48,7 @@ export function stopMonitoring() {
       state.monitoringVideo.removeEventListener("timeupdate", onTimeUpdate);
       state.monitoringVideo.removeEventListener("play", onPlay);
       state.monitoringVideo.removeEventListener("pause", onPause);
+      state.monitoringVideo.removeEventListener("volumechange", onVolumeChange);
     }
   } catch (_) { }
   state.monitoringVideo = null;

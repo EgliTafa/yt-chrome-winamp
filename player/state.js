@@ -18,11 +18,13 @@ export const state = {
   lastDuration: 0,
   lastCurrentTime: 0,
   lastTitle: "",
+  timeDisplayMode: "elapsed",
 
   userDraggingProgress: false,
 
   contentPort: null,
   youtubeTabId: null,
+  youtubeTabTitle: "",
   updateInterval: null,
   isConnected: false,
   connectionPhase: CONNECTION_PHASES.DISCONNECTED,
@@ -35,6 +37,8 @@ export const state = {
   scrubTime: null,
 
   volume: 100,
+  isMuted: false,
+  preMuteVolume: 100,
 
   playlistCollapsed: false,
 

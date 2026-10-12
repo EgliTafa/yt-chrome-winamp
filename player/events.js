@@ -1,7 +1,7 @@
 // player/events.js
-import { el, root } from "./dom.js";
+import { el } from "./dom.js";
 import { state } from "./state.js";
-import { setStatus, setHighlighted, fmtTime } from "./status.js";
+import { setStatus, setHighlighted, updateTimeDisplay } from "./status.js";
 import { sendCommand, stopUpdateInterval } from "./commands.js";
 import {
   connectToYouTubeTab,
@@ -14,10 +14,13 @@ import { setResizeFunction } from "./playlist.js";
 import {
   shouldSkipInitialWindowResize,
   saveVolumePref,
+  saveMutePrefs,
+  saveTimeDisplayModePref,
   saveVizModePref,
   savePlaylistCollapsedPref,
   saveWindowBoundsFromResize,
 } from "./prefs.js";
+import { applyMuteUI, applyVolumeUI } from "./audio-ui.js";
 
 function getVerticalPadding() {
   const outer = document.querySelector(".container");
@@ -85,6 +88,13 @@ export function updateConnectionControls() {
       "reconnecting",
     ].includes(state.connectionPhase);
     el.disconnectBtn.disabled = !state.isConnected && !attemptInProgress;
+  }
+
+  if (el.connectedTabStatus) {
+    el.connectedTabStatus.hidden = !state.isConnected;
+    el.connectedTabStatus.textContent = state.isConnected
+      ? `Connected: ${state.youtubeTabTitle || "YouTube player"}`
+      : "";
   }
 }
 
@@ -220,9 +230,7 @@ export function bindUI() {
       state.scrubTime = t;
 
       // Show the scrubbed time while dragging
-      el.timeDisplayer.textContent = fmtTime(t);
-      // Optional: hover tooltip for precise seconds
-      el.timeDisplayer.title = `${t.toFixed(3)}s`;
+      updateTimeDisplay(t, state.lastDuration, state.timeDisplayMode);
     };
 
     el.progressBar.addEventListener("input", () => {
@@ -248,8 +256,7 @@ export function bindUI() {
       state.lastCurrentTime = t;
       state.scrubTime = null;
       if (el.timeDisplayer) {
-        el.timeDisplayer.textContent = fmtTime(t);
-        el.timeDisplayer.title = `${t.toFixed(3)}s`;
+        updateTimeDisplay(t, state.lastDuration, state.timeDisplayMode);
       }
 
       sendCommand("SEEK", t);
@@ -258,15 +265,48 @@ export function bindUI() {
 
 
   if (el.volumeController) {
-    state.volume = Number(el.volumeController.value || state.volume);
-    root.style.setProperty("--volume-track-lightness", 100 - state.volume / 2 + "%");
+    applyVolumeUI(el.volumeController.value || state.volume);
 
     el.volumeController.addEventListener("input", (e) => {
       const v = Number(e.target.value || 0);
-      state.volume = v;
+      applyVolumeUI(v);
+      if (v > 0) state.preMuteVolume = v;
+      if (state.isMuted) applyMuteUI(true);
       sendCommand("VOLUME", v);
       saveVolumePref(v);
-      root.style.setProperty("--volume-track-lightness", 100 - v / 2 + "%");
+      if (state.isMuted) saveMutePrefs(true, state.preMuteVolume);
+    });
+  }
+
+  if (el.muteBtn) {
+    el.muteBtn.addEventListener("click", () => {
+      if (!state.isConnected) return setStatus("Not connected to YouTube.");
+
+      if (!state.isMuted) {
+        if (state.volume > 0) state.preMuteVolume = state.volume;
+        applyMuteUI(true);
+        sendCommand("MUTE", true);
+        saveMutePrefs(true, state.preMuteVolume);
+        setStatus("Muted.");
+        return;
+      }
+
+      const restoredVolume = state.preMuteVolume > 0 ? state.preMuteVolume : 100;
+      applyVolumeUI(restoredVolume);
+      applyMuteUI(false);
+      sendCommand("VOLUME", restoredVolume);
+      sendCommand("MUTE", false);
+      saveVolumePref(restoredVolume);
+      saveMutePrefs(false, restoredVolume);
+      setStatus(`Unmuted at ${restoredVolume}%.`);
+    });
+  }
+
+  if (el.timeDisplayer) {
+    el.timeDisplayer.addEventListener("click", () => {
+      state.timeDisplayMode = state.timeDisplayMode === "elapsed" ? "remaining" : "elapsed";
+      updateTimeDisplay(state.lastCurrentTime, state.lastDuration, state.timeDisplayMode);
+      saveTimeDisplayModePref(state.timeDisplayMode);
     });
   }
 
@@ -331,10 +371,25 @@ export function bindUI() {
     el.youtubeTabSelector.addEventListener("focus", () => {
       void refreshYoutubeTabOptions();
     });
-    el.youtubeTabSelector.addEventListener("change", () => {
+    el.youtubeTabSelector.addEventListener("change", async () => {
       const selected = el.youtubeTabSelector.selectedOptions?.[0]?.textContent || "YouTube tab";
       updateConnectionControls();
+      const tabId = getSelectedYoutubeTabId();
+      if (state.isConnected && tabId && tabId !== state.youtubeTabId) {
+        setStatus(`Switching to ${selected}...`);
+        await connectToYouTubeTab({ tabId });
+        await refreshYoutubeTabOptions(tabId);
+        updateConnectionControls();
+        return;
+      }
       setStatus(`Selected ${selected}. Press ${el.connectBtn?.textContent || "CONNECT"}.`);
+    });
+  }
+
+  if (el.connectedTabStatus) {
+    el.connectedTabStatus.addEventListener("click", () => {
+      el.youtubeTabSelector?.focus();
+      try { el.youtubeTabSelector?.showPicker?.(); } catch (_) { }
     });
   }
 
@@ -391,7 +446,8 @@ function onStop() {
   setHighlighted(el.stopBtn, false);
   setHighlighted(el.pauseBtn, false);
   if (el.progressBar) el.progressBar.value = "0";
-  if (el.timeDisplayer) el.timeDisplayer.textContent = "00:00";
+  state.lastCurrentTime = 0;
+  updateTimeDisplay(0, state.lastDuration, state.timeDisplayMode);
   stopUpdateInterval();
   stopViz();
   state.scrubTime = null;

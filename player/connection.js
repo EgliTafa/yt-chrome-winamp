@@ -5,6 +5,7 @@ import { handleContentMessage } from "./handlers.js";
 import { stopUpdateInterval, sendCommand } from "./commands.js";
 import { stopViz } from "./viz.js";
 import { savePreferredTabId } from "./prefs.js";
+import { applyMuteUI, applyVolumeUI } from "./audio-ui.js";
 
 const YOUTUBE_URL_PATTERNS = [
   "https://www.youtube.com/*",
@@ -367,6 +368,7 @@ export function disconnectFromYouTubeTab() {
   disposeContentPort();
   resetConnectedState();
   state.youtubeTabId = null;
+  state.youtubeTabTitle = "";
   state.reconnectAttempts = 0;
   setConnectionPhase(CONNECTION_PHASES.DISCONNECTED);
   setStatus("Disconnected from YouTube.");
@@ -378,6 +380,9 @@ export async function connectToYouTubeTab(options = {}) {
     : options || {};
   const explicitTabId = Number(normalized.tabId) || null;
   const isRetry = normalized.retry === true;
+  const preferredVolume = state.volume;
+  const preferredMuted = state.isMuted;
+  const preferredPreMuteVolume = state.preMuteVolume;
 
   state.userDisconnected = false;
   if (!isRetry) state.reconnectAttempts = 0;
@@ -421,13 +426,18 @@ export async function connectToYouTubeTab(options = {}) {
 
     bindActivePort(port, targetTabId);
     state.isConnected = true;
+    state.youtubeTabTitle = String(tab.title || "YouTube player");
+    state.preMuteVolume = preferredPreMuteVolume;
+    applyVolumeUI(preferredVolume);
+    applyMuteUI(preferredMuted);
     setConnectionPhase(CONNECTION_PHASES.CONNECTED);
     state.reconnectAttempts = 0;
     activeAttempt = null;
 
-    setStatus(`Connected to ${tab.title || "YouTube player"}`);
+    setStatus(`Ready: ${state.youtubeTabTitle}`);
     savePreferredTabId(targetTabId);
     sendCommand("VOLUME", state.volume);
+    sendCommand("MUTE", state.isMuted);
     sendCommand("GET_STATE");
     sendCommand("GET_PLAYLIST");
     return true;

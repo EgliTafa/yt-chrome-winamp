@@ -13,6 +13,7 @@ export const el = {
   // controls
   timeDisplayer: qs(".time-displayer"),
   volumeController: qs(".volume-controller"),
+  muteBtn: qs(".mute-btn"),
   progressBar: qs(".progress-bar"),
 
   playBtn: qs(".play-btn"),
@@ -24,6 +25,7 @@ export const el = {
   youtubeTabSelector: qs(".youtube-tab-selector"),
   connectBtn: qs(".connect-btn"),
   disconnectBtn: qs(".disconnect-btn"),
+  connectedTabStatus: qs(".connected-tab-status"),
   statusText: qs(".status-text"),
   nowPlaying: qs(".now-playing"),
 

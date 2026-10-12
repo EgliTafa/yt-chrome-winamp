@@ -35,7 +35,9 @@
 
           <div class="time-container">
             <div class="time-container--left">
-              <div class="time-displayer">00:00</div>
+              <button class="time-displayer" type="button" title="Click to show remaining time">
+                00:00 / 00:00
+              </button>
             </div>
 
             <div class="time-container--right">
@@ -53,6 +55,9 @@
               </div>
 
               <div class="volume">
+                <button class="mute-btn" type="button" title="Mute audio" aria-label="Mute audio" aria-pressed="false">
+                  MUTE
+                </button>
                 <input class="volume-controller" type="range" min="0" max="100" value="100" step="1" aria-label="Volume" />
               </div>
             </div>
@@ -81,8 +86,9 @@
             <div class="logo" title="Winamp">⚡</div>
           </div>
 
-          <div class="status-bar" role="status" aria-live="polite" aria-atomic="true">
-            <span class="status-text">Idle.</span>
+          <div class="status-bar">
+            <button class="connected-tab-status" type="button" hidden title="Choose another YouTube tab"></button>
+            <span class="status-text" role="status" aria-live="polite" aria-atomic="true">Idle.</span>
           </div>
         </div>
       </div>

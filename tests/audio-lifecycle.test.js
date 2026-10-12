@@ -13,6 +13,14 @@ test("reuses the audio context and one source per video element", async () => {
 
   class FakeAnalyser extends FakeAudioNode {
     frequencyBinCount = 32;
+
+    getByteFrequencyData(data) {
+      data.fill(24);
+    }
+
+    getByteTimeDomainData(data) {
+      data.fill(128);
+    }
   }
 
   class FakeAudioContext {
@@ -67,4 +75,14 @@ test("reuses the audio context and one source per video element", async () => {
   assert.equal(await visualiser.ensureAudioGraph(), true);
   assert.equal(contextCount, 1, "SPA navigation must keep one AudioContext");
   assert.equal(sourceCount, 2, "each unique video element gets exactly one source");
+
+  const { state } = await import("../content-script/state.js");
+  state.port = { postMessage() {} };
+  await visualiser.startVisualiserStream();
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.notEqual(state.vizTimer, null, "stream should schedule sampling while connected");
+
+  state.port = null;
+  await new Promise((resolve) => setTimeout(resolve, 35));
+  assert.equal(state.vizTimer, null, "a disconnected stream must clear its restart guard");
 });

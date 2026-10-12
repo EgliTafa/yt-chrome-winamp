@@ -161,6 +161,38 @@ h1 {
   width: 100%;
   color: lime;
   font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.connected-tab-status {
+  width: 100%;
+  height: auto;
+  padding: 0;
+  overflow: hidden;
+  color: #7cff7c;
+  background: transparent;
+  border: 0;
+  font-size: 12px;
+  font-weight: normal;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.connected-tab-status:hover {
+  color: white;
+  text-decoration: underline;
+}
+
+.connected-tab-status:active {
+  border: 0;
+  transform: none;
+}
+
+.connected-tab-status:after {
+  display: none;
 }
 
 .time-container {
@@ -183,8 +215,16 @@ h1 {
   color: lime;
   background: black;
   width: 100%;
-  font-size: 3rem;
+  font-size: 1.2rem;
   border: 2px inset #555265;
+  height: auto;
+  min-height: 4rem;
+  padding: .2rem;
+  line-height: 1.05;
+}
+
+.time-displayer:after {
+  display: none;
 }
 
 /* ---------------------------------------
@@ -292,10 +332,30 @@ input[type=range]::-ms-thumb {
 }
 
 .volume-controller {
-  width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
   height: .75rem;
   border-radius: 25px;
   border: 2px inset #555265;
+}
+
+.volume {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mute-btn {
+  width: 4rem;
+  min-width: 4rem;
+  height: 1.75rem;
+  font-size: .8rem;
+  letter-spacing: .05em;
+}
+
+.mute-btn:after {
+  width: 4rem;
+  height: 1.75rem;
 }
 
 /* Chrome */

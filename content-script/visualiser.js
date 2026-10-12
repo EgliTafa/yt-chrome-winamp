@@ -123,77 +123,95 @@ function downsampleToBars(freqData, barsCount = VIZ_BARS_COUNT) {
 }
 
 export async function startVisualiserStream() {
-  if (state.disabled || state.vizTimer || !state.port) return;
+  if (state.disabled || state.vizTimer || state.vizStarting || !state.port) return;
   clearVizRetryTimer();
+  const startToken = ++state.vizStartToken;
+  state.vizStarting = true;
 
-  const ok = await ensureAudioGraph();
-  if (!ok || !state.analyser) {
-    // Player/video can be briefly unavailable during SPA transitions.
-    // Retry soon so popup does not stay in a black "started but no data" state.
-    if (state.vizRetryTimer) return;
-    state.vizRetryTimer = setTimeout(() => {
-      state.vizRetryTimer = null;
-      if (!state.disabled && !state.vizTimer && state.port) {
-        startVisualiserStream().catch(() => { });
+  try {
+    const ok = await ensureAudioGraph();
+    if (
+      startToken !== state.vizStartToken ||
+      state.disabled ||
+      !state.port
+    ) return;
+    if (!ok || !state.analyser) {
+      // Player/video can be briefly unavailable during SPA transitions.
+      // Retry soon so popup does not stay in a black "started but no data" state.
+      if (state.vizRetryTimer) return;
+      state.vizRetryTimer = setTimeout(() => {
+        state.vizRetryTimer = null;
+        if (!state.disabled && !state.vizTimer && state.port) {
+          startVisualiserStream().catch(() => { });
+        }
+      }, 400);
+      return;
+    }
+
+    const MIN_FRAME_MS = 16; // ~60 FPS ceiling
+    const MAX_FRAME_MS = 33; // ~30 FPS floor
+    let targetFrameMs = 20;
+    let lastTick = performance.now();
+    const freq = new Uint8Array(state.analyser.frequencyBinCount);
+    const time = new Uint8Array(state.analyser.fftSize); // time domain
+
+    const tick = () => {
+      if (state.disabled || !state.port || !state.analyser) {
+        // Clear the timer sentinel as well as the scheduled callback. Otherwise
+        // a later START_VIZ sees a truthy vizTimer and can never restart.
+        stopVisualiserStream();
+        return;
       }
-    }, 400);
-    return;
+
+      if (state.attachedVideoEl !== getVideoEl()) {
+        ensureAudioGraph().catch(() => { });
+      }
+
+      try {
+        const tickStart = performance.now();
+
+        state.analyser.getByteFrequencyData(freq);
+        state.analyser.getByteTimeDomainData(time);
+
+        const bars = downsampleToBars(freq, VIZ_BARS_COUNT);
+        const wave = downsampleToWavePoints(time, 96);
+
+        safePost({ type: "AUDIO_DATA", bars, wave });
+
+        const workMs = performance.now() - tickStart;
+        // Adaptively move between 30-60 FPS based on processing cost.
+        if (workMs > 8) targetFrameMs = Math.min(MAX_FRAME_MS, targetFrameMs + 2);
+        else if (workMs < 4) targetFrameMs = Math.max(MIN_FRAME_MS, targetFrameMs - 1);
+      } catch (e) {
+        stopVisualiserStream();
+        if (!state.disabled && state.port) {
+          state.vizRetryTimer = setTimeout(() => {
+            state.vizRetryTimer = null;
+            startVisualiserStream().catch(() => { });
+          }, 400);
+        }
+        return;
+      }
+
+      const now = performance.now();
+      const elapsed = now - lastTick;
+      lastTick = now;
+
+      // Keep stable pacing even if the current tick ran long.
+      const delay = Math.max(0, targetFrameMs - elapsed);
+      state.vizTimer = setTimeout(tick, delay);
+    };
+
+    state.vizTimer = setTimeout(tick, 0);
+  } finally {
+    if (startToken === state.vizStartToken) state.vizStarting = false;
   }
-
-  const MIN_FRAME_MS = 16; // ~60 FPS ceiling
-  const MAX_FRAME_MS = 33; // ~30 FPS floor
-  let targetFrameMs = 20;
-  let lastTick = performance.now();
-  const freq = new Uint8Array(state.analyser.frequencyBinCount);
-  const time = new Uint8Array(state.analyser.fftSize); // time domain
-
-  const tick = () => {
-    if (state.disabled || !state.port || !state.analyser) return;
-
-    if (state.attachedVideoEl !== getVideoEl()) {
-      ensureAudioGraph().catch(() => { });
-    }
-
-    if (!state.port) {
-      stopVisualiserStream();
-      cleanupAudio();
-      return;
-    }
-
-    try {
-      const tickStart = performance.now();
-
-      state.analyser.getByteFrequencyData(freq);
-      state.analyser.getByteTimeDomainData(time);
-
-      const bars = downsampleToBars(freq, VIZ_BARS_COUNT);
-      const wave = downsampleToWavePoints(time, 96);
-
-      safePost({ type: "AUDIO_DATA", bars, wave });
-
-      const workMs = performance.now() - tickStart;
-      // Adaptively move between 30-60 FPS based on processing cost.
-      if (workMs > 8) targetFrameMs = Math.min(MAX_FRAME_MS, targetFrameMs + 2);
-      else if (workMs < 4) targetFrameMs = Math.max(MIN_FRAME_MS, targetFrameMs - 1);
-    } catch (e) {
-      stopVisualiserStream();
-      return;
-    }
-
-    const now = performance.now();
-    const elapsed = now - lastTick;
-    lastTick = now;
-
-    // Keep stable pacing even if the current tick ran long.
-    const delay = Math.max(0, targetFrameMs - elapsed);
-    state.vizTimer = setTimeout(tick, delay);
-  };
-
-  state.vizTimer = setTimeout(tick, 0);
 }
 
 export function stopVisualiserStream() {
   clearVizRetryTimer();
+  state.vizStartToken++;
+  state.vizStarting = false;
   if (state.vizTimer) clearTimeout(state.vizTimer);
   state.vizTimer = null;
 }

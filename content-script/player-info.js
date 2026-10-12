@@ -72,6 +72,9 @@ export function sendPlayerInfo() {
 
   const title = titleElement ? titleElement.textContent.trim() : "";
 
+  if (state.volume === null) state.volume = Math.round(video.volume * 100);
+  if (state.muted === null) state.muted = !!video.muted;
+
   safePost({
     type: "PLAYER_INFO",
     currentTime: video.currentTime,
@@ -82,6 +85,7 @@ export function sendPlayerInfo() {
       state.volume !== null
         ? state.volume
         : Math.round(video.volume * 100),
+    muted: state.muted !== null ? state.muted : !!video.muted,
     videoId: state.currentVideoId,
     playlistId: state.currentPlaylistId,
     shuffle: getShuffleState(),

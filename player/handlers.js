@@ -1,11 +1,12 @@
 // player/handlers.js
-import { el, root } from "./dom.js";
+import { el } from "./dom.js";
 import { state } from "./state.js";
-import { fmtTime, setHighlighted, setStatus } from "./status.js";
+import { setHighlighted, setStatus, updateTimeDisplay } from "./status.js";
 import { setTrackTitle } from "./marquee.js";
 import { startUpdateInterval } from "./commands.js";
 import { startViz, stopViz, setAudioBars, setWaveformPoints } from "./viz.js";
 import { setPlaylistItems } from "./playlist.js";
+import { applyMuteUI, applyVolumeUI } from "./audio-ui.js";
 
 export function handleContentMessage(msg) {
   if (!msg?.type) return;
@@ -22,6 +23,7 @@ export function handleContentMessage(msg) {
     case "AUDIO_DATA":
       if (msg.bars) setAudioBars(msg.bars);
       if (msg.wave) setWaveformPoints(msg.wave);
+      if (state.play && !state.pause) startViz({ requestStream: false });
       break;
 
     case "PLAYLIST_ITEMS":
@@ -67,17 +69,17 @@ export function handlePlayerInfo(info) {
     return;
   }
 
-  if (typeof info.currentTime === "number") state.lastCurrentTime = info.currentTime;
-  if (typeof info.duration === "number" && info.duration > 0) state.lastDuration = info.duration;
+  if (Number.isFinite(info.currentTime)) state.lastCurrentTime = info.currentTime;
+  if (Number.isFinite(info.duration) && info.duration > 0) state.lastDuration = info.duration;
   if (typeof info.title === "string" && info.title) state.lastTitle = info.title;
 
   if (typeof info.volume === "number" && info.volume !== state.volume) {
-    state.volume = info.volume;
-    if (el.volumeController) {
-      el.volumeController.value = String(info.volume);
-      root.style.setProperty("--volume-track-lightness", 100 - info.volume / 2 + "%");
-    }
+    applyVolumeUI(info.volume);
   }
+  if (typeof info.volume === "number" && info.volume > 0) {
+    state.preMuteVolume = info.volume;
+  }
+  if (typeof info.muted === "boolean") applyMuteUI(info.muted);
 
   if (typeof info.shuffle === "boolean") {
     state.isShuffleOn = info.shuffle;
@@ -92,15 +94,11 @@ export function handlePlayerInfo(info) {
     setHighlighted(el.repeatBtn, state.repeatMode > 0);
   }
 
-  if (el.timeDisplayer) {
-    const t =
-      state.userDraggingProgress && typeof state.scrubTime === "number"
-        ? state.scrubTime
-        : state.lastCurrentTime;
-
-    el.timeDisplayer.textContent = fmtTime(t);
-    el.timeDisplayer.title = `${t.toFixed(3)}s`;
-  }
+  const t =
+    state.userDraggingProgress && typeof state.scrubTime === "number"
+      ? state.scrubTime
+      : state.lastCurrentTime;
+  updateTimeDisplay(t, state.lastDuration, state.timeDisplayMode);
 
   setTrackTitle(state.lastTitle || "YouTube Player");
   // Hide now-playing section to avoid duplication
@@ -121,6 +119,12 @@ export function handlePlayerInfo(info) {
   } else if (info.playerState === 2) {
     state.pause = true;
     setHighlighted(el.pauseBtn, true);
+    stopViz();
+  } else {
+    state.play = false;
+    state.pause = false;
+    setHighlighted(el.playBtn, false);
+    setHighlighted(el.pauseBtn, false);
     stopViz();
   }
 }

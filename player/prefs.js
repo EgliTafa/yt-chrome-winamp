@@ -1,10 +1,14 @@
 // player/prefs.js — chrome.storage.sync (settings) + local (window bounds)
-import { el, root } from "./dom.js";
 import { state } from "./state.js";
 import { setVizMode, getVizMode } from "./viz.js";
+import { applyMuteUI, applyVolumeUI, normalizeVolume } from "./audio-ui.js";
+import { updateTimeDisplay } from "./status.js";
 
 const SYNC_KEYS = [
   "volume",
+  "muted",
+  "preMuteVolume",
+  "timeDisplayMode",
   "vizMode",
   "playlistCollapsed",
   "sortAlphabetical",
@@ -16,12 +20,6 @@ let restoredWindowBounds = false;
 let pendingSync = {};
 let saveSyncTimer = null;
 let persistenceQueue = Promise.resolve();
-
-function clampVolume(v) {
-  const n = Number(v);
-  if (!Number.isFinite(n)) return null;
-  return Math.max(0, Math.min(100, Math.round(n)));
-}
 
 function clampVizMode(v) {
   const n = Number(v);
@@ -143,14 +141,6 @@ export function flushSavePrefs() {
   return persistenceQueue;
 }
 
-function applyVolumeToUI(volume) {
-  const v = clampVolume(volume);
-  if (v === null) return;
-  state.volume = v;
-  if (el.volumeController) el.volumeController.value = String(v);
-  root.style.setProperty("--volume-track-lightness", 100 - v / 2 + "%");
-}
-
 export async function loadAndApplyPrefs() {
   let syncData = {};
   let localData = {};
@@ -183,8 +173,22 @@ export async function loadAndApplyPrefs() {
   // this launch, whether this retry succeeds or not.
   await retryLocalFallbackSync(localFallback);
 
-  const volume = clampVolume(prefs.volume);
-  if (volume !== null) applyVolumeToUI(volume);
+  const volume = normalizeVolume(prefs.volume);
+  if (volume !== null) applyVolumeUI(volume);
+
+  const preMuteVolume = normalizeVolume(prefs.preMuteVolume);
+  if (preMuteVolume !== null && preMuteVolume > 0) {
+    state.preMuteVolume = preMuteVolume;
+  } else if (volume !== null && volume > 0) {
+    state.preMuteVolume = volume;
+  }
+
+  if (typeof prefs.muted === "boolean") applyMuteUI(prefs.muted);
+
+  if (prefs.timeDisplayMode === "elapsed" || prefs.timeDisplayMode === "remaining") {
+    state.timeDisplayMode = prefs.timeDisplayMode;
+  }
+  updateTimeDisplay(state.lastCurrentTime, state.lastDuration, state.timeDisplayMode);
 
   const vizMode = clampVizMode(prefs.vizMode);
   if (vizMode !== null) setVizMode(vizMode);
@@ -277,9 +281,21 @@ export function savePreferredTabId(tabId) {
 }
 
 export function saveVolumePref(volume) {
-  const v = clampVolume(volume);
+  const v = normalizeVolume(volume);
   if (v === null) return;
   queueSavePrefs({ volume: v });
+}
+
+export function saveMutePrefs(muted, preMuteVolume) {
+  const volume = normalizeVolume(preMuteVolume);
+  const payload = { muted: !!muted };
+  if (volume !== null && volume > 0) payload.preMuteVolume = volume;
+  queueSavePrefs(payload);
+}
+
+export function saveTimeDisplayModePref(mode) {
+  if (mode !== "elapsed" && mode !== "remaining") return;
+  queueSavePrefs({ timeDisplayMode: mode });
 }
 
 export function saveVizModePref() {

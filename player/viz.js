@@ -275,32 +275,36 @@ function draw(ts = performance.now()) {
   raf = requestAnimationFrame(draw);
 }
 
-export function startViz() {
+export function startViz({ requestStream = true } = {}) {
   if (!el.visualisationCanvas) return;
 
   // Always re-request the stream while playing in case initial startup raced
   // with connection/audio graph readiness.
-  if (send) send("START_VIZ");
+  if (requestStream && send) send("START_VIZ");
+
+  // AUDIO_DATA may arrive after an earlier stop/reconnect. Treat data as proof
+  // that the stream is live and make the canvas visible without echoing a new
+  // START_VIZ command for every frame.
+  el.visualisationCanvas.style.display = "block";
+  el.visualisationCanvas.style.cursor = "pointer";
+  el.visualisationCanvas.title = "Click to change visualizer";
 
   if (running) return;
   running = true;
   lastRenderTs = 0;
   renderedDataVersion = -1;
 
-  el.visualisationCanvas.style.display = "block";
-  el.visualisationCanvas.style.cursor = "pointer";
-  el.visualisationCanvas.title = "Click to change visualizer";
-
   peakBars = [];
   raf = requestAnimationFrame(draw);
 }
 
 export function stopViz() {
-  if (!el.visualisationCanvas || !running) return;
+  if (!el.visualisationCanvas) return;
+  const wasRunning = running;
   running = false;
 
   try {
-    if (send) send("STOP_VIZ");
+    if (wasRunning && send) send("STOP_VIZ");
   } catch (_) { }
 
   if (raf) cancelAnimationFrame(raf);

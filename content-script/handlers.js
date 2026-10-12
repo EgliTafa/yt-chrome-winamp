@@ -14,6 +14,7 @@ import {
   previousVideo,
   seekTo,
   setVolume,
+  setMuted,
   setShuffle,
   setLoop,
 } from "./player-controls.js";
@@ -73,6 +74,12 @@ export function handleExtensionMessage(msg) {
       const volume = clampNumber(msg.value, 0, 100);
       if (volume === null) break;
       setVolume(volume);
+      break;
+    }
+    case "MUTE": {
+      const muted = asBoolean(msg.value);
+      if (muted === null) break;
+      setMuted(muted);
       break;
     }
     case "SHUFFLE": {

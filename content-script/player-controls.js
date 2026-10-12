@@ -18,6 +18,16 @@ export function setVolume(value) {
   }
 }
 
+export function setMuted(enabled) {
+  state.muted = !!enabled;
+
+  const video = getVideoEl();
+  if (video) {
+    applyVolumeToVideo(video);
+    sendPlayerInfo();
+  }
+}
+
 export function seekTo(seconds) {
   const video = getVideoEl();
   if (video) {

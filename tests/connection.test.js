@@ -25,10 +25,12 @@ class FakePort {
     this.disconnected = false;
     this.onMessage = new ListenerSet();
     this.onDisconnect = new ListenerSet();
+    this.messages = [];
   }
 
   postMessage(message) {
     if (this.disconnected) throw new Error("Port is disconnected");
+    this.messages.push(message);
     if (message?.type === "GET_STATE") {
       queueMicrotask(() => {
         if (!this.disconnected) {
@@ -126,6 +128,11 @@ test("cancels overlapping attempts, switches tabs, and explicitly disconnects", 
   assert.equal(state.youtubeTabId, 2);
   assert.equal(state.contentPort, ports.get(2));
   assert.equal(state.connectionPhase, CONNECTION_PHASES.CONNECTED);
+  assert.equal(state.youtubeTabTitle, "Tab 2");
+  assert.ok(
+    ports.get(2).messages.some((message) => message.type === "MUTE" && message.value === false),
+    "connection must apply the player mute state"
+  );
 
   const secondPort = ports.get(2);
   assert.equal(await connection.connectToYouTubeTab({ tabId: 3 }), true);
@@ -139,6 +146,7 @@ test("cancels overlapping attempts, switches tabs, and explicitly disconnects", 
   assert.equal(state.contentPort, null);
   assert.equal(state.isConnected, false);
   assert.equal(state.userDisconnected, true);
+  assert.equal(state.youtubeTabTitle, "");
   assert.equal(state.reconnectTimeout, null);
   assert.equal(state.connectionPhase, CONNECTION_PHASES.DISCONNECTED);
 

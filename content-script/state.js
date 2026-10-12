@@ -16,6 +16,8 @@ export const state = {
   currentPlaylistId: null,
   /** User volume 0–100; null until first video read or VOLUME command */
   volume: null,
+  /** Preserve YouTube's initial mute state until the player sends a preference. */
+  muted: null,
   lastVolumeSyncedVideoId: undefined,
 
   // Visualiser state
@@ -29,6 +31,8 @@ export const state = {
   mediaElementSources: new WeakMap(),
   vizTimer: null,
   vizRetryTimer: null,
+  vizStarting: false,
+  vizStartToken: 0,
   audioInitPromise: null,
 
   // Monitoring / SPA
