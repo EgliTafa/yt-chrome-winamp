@@ -23,6 +23,10 @@ export const state = {
   analyser: null,
   sourceNode: null,
   attachedVideoEl: null,
+  // A media element may only be passed to createMediaElementSource() once.
+  // Keep its node for the lifetime of the page so popup reconnects and
+  // YouTube SPA navigation can safely reuse it.
+  mediaElementSources: new WeakMap(),
   vizTimer: null,
   vizRetryTimer: null,
   audioInitPromise: null,

@@ -12,68 +12,77 @@ function clearVizRetryTimer() {
 
 export function cleanupAudio() {
   clearVizRetryTimer();
-  state.audioInitPromise = null;
 
-  try { state.sourceNode?.disconnect(); } catch (_) { }
-  try { state.analyser?.disconnect(); } catch (_) { }
-  try { state.audioCtx?.close(); } catch (_) { }
-
-  state.audioCtx = null;
-  state.analyser = null;
-  state.sourceNode = null;
-  state.attachedVideoEl = null;
+  // Deliberately keep the graph alive for the lifetime of this page.
+  // Browsers allow only one MediaElementAudioSourceNode per media element;
+  // closing the context and clearing sourceNode makes a later popup reconnect
+  // attempt createMediaElementSource(video) for the same element and throw.
+  // Stopping the sampling timer is enough: an idle analyser does no polling,
+  // while retaining the graph also keeps the video's audio routed correctly.
 }
 
 export async function ensureAudioGraph() {
   if (state.audioInitPromise) return state.audioInitPromise;
 
   state.audioInitPromise = (async () => {
-  const video = getVideoEl();
-  if (!video) return false;
+    const video = getVideoEl();
+    if (!video) return false;
 
-  if (!state.audioCtx) {
-    state.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  }
-
-  if (state.audioCtx.state === "suspended") {
-    try { await state.audioCtx.resume(); } catch (_) { }
-  }
-
-  if (!state.analyser) {
-    state.analyser = state.audioCtx.createAnalyser();
-    state.analyser.fftSize = 2048;
-    state.analyser.smoothingTimeConstant = 0.8;
-    state.analyser.connect(state.audioCtx.destination);
-  }
-
-  if (state.attachedVideoEl !== video) {
-    try {
-      try { state.sourceNode?.disconnect(); } catch (_) { }
-      state.sourceNode = state.audioCtx.createMediaElementSource(video);
-      state.sourceNode.connect(state.analyser);
-      state.attachedVideoEl = video;
-    } catch (e) {
-      // MediaElementSource can throw if graph binding is stale; rebuild once.
-      try { stopVisualiserStream(); } catch (_) { }
-      try { cleanupAudio(); } catch (_) { }
+    if (!state.audioCtx) {
+      const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextCtor) return false;
 
       try {
-        state.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        state.analyser = state.audioCtx.createAnalyser();
-        state.analyser.fftSize = 2048;
-        state.analyser.smoothingTimeConstant = 0.8;
-        state.analyser.connect(state.audioCtx.destination);
-
-        state.sourceNode = state.audioCtx.createMediaElementSource(video);
-        state.sourceNode.connect(state.analyser);
-        state.attachedVideoEl = video;
+        state.audioCtx = new AudioContextCtor();
       } catch (_) {
         return false;
       }
     }
-  }
 
-  return true;
+    // A closed context cannot be repaired for an element that was already
+    // associated with one of its source nodes. Do not create a second context.
+    if (state.audioCtx.state === "closed") return false;
+
+    if (state.audioCtx.state === "suspended") {
+      try { await state.audioCtx.resume(); } catch (_) { }
+    }
+
+    if (!state.analyser) {
+      try {
+        state.analyser = state.audioCtx.createAnalyser();
+        state.analyser.fftSize = 2048;
+        state.analyser.smoothingTimeConstant = 0.8;
+        state.analyser.connect(state.audioCtx.destination);
+      } catch (_) {
+        return false;
+      }
+    }
+
+    if (state.attachedVideoEl !== video) {
+      try {
+        // YouTube can replace its <video> during SPA navigation. Disconnect
+        // the old node, but keep it in the WeakMap in case that element returns.
+        try { state.sourceNode?.disconnect(); } catch (_) { }
+
+        let sourceNode = state.mediaElementSources.get(video);
+        if (!sourceNode) {
+          sourceNode = state.audioCtx.createMediaElementSource(video);
+          state.mediaElementSources.set(video, sourceNode);
+        }
+
+        sourceNode.connect(state.analyser);
+        state.sourceNode = sourceNode;
+        state.attachedVideoEl = video;
+      } catch (_) {
+        // Retrying createMediaElementSource() with another context can mute the
+        // video and still fails for an already-associated element. Leave the
+        // existing graph untouched and retry only when YouTube exposes a new
+        // video element.
+        return false;
+      }
+    }
+
+    return true;
   })();
 
   try {

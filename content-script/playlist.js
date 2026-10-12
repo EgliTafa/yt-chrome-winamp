@@ -2,60 +2,158 @@
 import { state } from "./state.js";
 import { extractVideoIdFromHref, clickLikeUser } from "./helpers.js";
 import { safePost } from "./helpers.js";
-import { SELECTORS } from "./selectors.js";
+import { SELECTORS, queryFirst } from "./selectors.js";
+
+function selectorList(value) {
+  return Array.isArray(value) ? value : [value];
+}
+
+function queryAll(root, selectors) {
+  if (!root) return [];
+
+  const found = [];
+  const seen = new Set();
+  for (const selector of selectorList(selectors)) {
+    for (const node of root.querySelectorAll(selector)) {
+      if (seen.has(node)) continue;
+      seen.add(node);
+      found.push(node);
+    }
+  }
+  return found;
+}
+
+function isPlaylistPage() {
+  return window.location.pathname === "/playlist" ||
+    !!document.querySelector("ytd-browse[page-subtype='playlist']");
+}
 
 export function findPlaylistPanelRoot() {
-  // Watch page: playlist panel on the right
-  return document.querySelector(SELECTORS.playlistPanelRoot);
+  // Watch page: playlist panel on the right.
+  return queryFirst(SELECTORS.playlistPanelRoot);
+}
+
+export function findPlaylistPageRoot() {
+  // Do not let a generic renderer elsewhere on YouTube masquerade as a
+  // playlist page. The URL check survives renderer attribute changes.
+  if (!isPlaylistPage()) return null;
+  return queryFirst(SELECTORS.playlistPageRoot);
+}
+
+function findItemAnchor(node) {
+  if (!node) return null;
+
+  for (const selector of selectorList(SELECTORS.playlistItemAnchor)) {
+    if (node.matches?.(selector) && extractVideoIdFromHref(node.getAttribute("href") || "")) {
+      return node;
+    }
+
+    const anchor = node.querySelector?.(selector);
+    if (anchor && extractVideoIdFromHref(anchor.getAttribute("href") || "")) {
+      return anchor;
+    }
+  }
+
+  return null;
+}
+
+function collectItemNodes(root, itemSelectors) {
+  const rendererNodes = queryAll(root, itemSelectors);
+  if (rendererNodes.length) return rendererNodes;
+
+  // YouTube periodically changes renderer element names. Keep extraction
+  // working by falling back to unique watch links within the selected surface.
+  return queryAll(root, SELECTORS.playlistFallbackAnchor);
+}
+
+function getPlaylistSurface() {
+  // On the standalone playlist route, prefer its own listing even if YouTube
+  // leaves a hidden/stale watch-panel renderer in the SPA document.
+  const pageRoot = findPlaylistPageRoot();
+  if (pageRoot) {
+    return {
+      kind: "playlist-page",
+      root: pageRoot,
+      nodes: collectItemNodes(pageRoot, SELECTORS.playlistPageItem),
+    };
+  }
+
+  const panelRoot = findPlaylistPanelRoot();
+  if (panelRoot) {
+    return {
+      kind: "watch-panel",
+      root: panelRoot,
+      nodes: collectItemNodes(panelRoot, SELECTORS.playlistPanelItem),
+    };
+  }
+
+  return null;
+}
+
+function cleanTitle(rawTitle) {
+  let title = String(rawTitle || "").trim();
+  title = title.replace(/now\s+playing\s*/gi, "").trim();
+  title = title.replace(/\s*\d{1,2}:\d{2}(?::\d{2})?\s*/g, " ").trim();
+  title = title.replace(/^(\d+)\.?\s+\1\s+/, "").trim();
+  title = title.replace(/^(\d+)\.?\s+(\d+)\s+/, "").trim();
+  title = title.replace(/^[►▷]\s*/, "").trim();
+  return title.replace(/\s+/g, " ").trim();
+}
+
+function readTitle(node, anchor) {
+  const preferredTitle = anchor?.getAttribute("title") || "";
+  if (preferredTitle.trim()) return cleanTitle(preferredTitle);
+
+  for (const selector of selectorList(SELECTORS.playlistItemTitle)) {
+    const titleNode = node.matches?.(selector) ? node : node.querySelector?.(selector);
+    const title = titleNode?.getAttribute?.("title") || titleNode?.textContent || "";
+    if (title.trim()) return cleanTitle(title);
+  }
+
+  return cleanTitle(anchor?.getAttribute("aria-label") || anchor?.textContent || "");
+}
+
+function isCurrentItem(node, anchor, videoId) {
+  const currentVideoId = new URLSearchParams(window.location.search).get("v");
+  return node.hasAttribute?.("selected") ||
+    node.classList?.contains("selected") ||
+    anchor?.getAttribute("aria-current") === "true" ||
+    anchor?.getAttribute("aria-current") === "page" ||
+    (!!currentVideoId && currentVideoId === videoId);
 }
 
 export function scrapePlaylistItems() {
-  const nodes = Array.from(document.querySelectorAll(SELECTORS.playlistPanelItem));
-  if (!nodes.length) return [];
+  const surface = getPlaylistSurface();
+  if (!surface?.nodes.length) return [];
 
-  return nodes.map((node, i) => {
-    // Try to get the title from the title attribute first (cleanest)
-    const a = node.querySelector(SELECTORS.playlistItemAnchor.join(","));
+  const items = [];
+  const seenVideoIds = new Set();
 
-    let title = "";
-    
-    // Prefer title attribute as it's usually cleaner
-    if (a?.getAttribute("title")) {
-      title = a.getAttribute("title").trim();
-    } else if (a?.textContent) {
-      // If using textContent, we need to clean it more aggressively
-      title = a.textContent.trim();
-    }
-    
-    // Clean title: remove "Now playing", durations, and any duplicate numbers
-    // Remove "Now playing" text (case insensitive)
-    title = title.replace(/now\s+playing\s*/gi, "").trim();
-    // Remove duration patterns like "6:24", "3:50", "1:23:45" (with optional spaces)
-    title = title.replace(/\s*\d{1,2}:\d{2}(?::\d{2})?\s*/g, " ").trim();
-    // Remove duplicate numbers at the start (e.g., "1 1 title" -> "1 title")
-    title = title.replace(/^(\d+)\.?\s+\1\s+/, "").trim();
-    // Remove standalone numbers that might be duplicates (e.g., "1 2 title" -> "title")
-    title = title.replace(/^(\d+)\.?\s+(\d+)\s+/, "").trim();
-    // Remove play icon if present
-    title = title.replace(/^►\s*/, "").trim();
-    // Clean up multiple spaces
-    title = title.replace(/\s+/g, " ").trim();
+  for (const node of surface.nodes) {
+    const anchor = findItemAnchor(node);
+    const href = anchor?.getAttribute("href") || "";
+    const videoId = extractVideoIdFromHref(href) ||
+      node.getAttribute?.("video-id") ||
+      node.getAttribute?.("data-video-id") ||
+      null;
 
-    const href = a?.getAttribute("href") || "";
-    const videoId = extractVideoIdFromHref(href);
+    // Renderer fallbacks may expose the thumbnail link and title link for the
+    // same track. De-duplicate them before assigning display indices.
+    if (videoId && seenVideoIds.has(videoId)) continue;
+    if (videoId) seenVideoIds.add(videoId);
 
-    const isCurrent =
-      node.hasAttribute("selected") ||
-      node.classList.contains("selected") ||
-      a?.getAttribute("aria-current") === "true";
+    const title = readTitle(node, anchor);
+    if (!title && !videoId) continue;
 
-    return {
-      index: i + 1,
+    items.push({
+      index: items.length + 1,
       title,
-      videoId: videoId || null,
-      isCurrent: !!isCurrent,
-    };
-  });
+      videoId,
+      isCurrent: !!isCurrentItem(node, anchor, videoId),
+    });
+  }
+
+  return items;
 }
 
 function computeSig(items) {
@@ -65,9 +163,9 @@ function computeSig(items) {
 export function sendPlaylistItems(force = false) {
   if (state.disabled || !state.port) return;
 
-  const root = findPlaylistPanelRoot();
-  if (!root) {
-    // Only send empty ONCE until the panel appears
+  const surface = getPlaylistSurface();
+  if (!surface) {
+    // Only send empty ONCE until either playlist surface appears.
     if (!state.lastSentEmpty) {
       state.lastSentEmpty = true;
       state.lastPlaylistSig = "";
@@ -98,7 +196,8 @@ function throttledSendPlaylist() {
 export function ensurePlaylistObserver(forceRestart = false) {
   if (state.disabled) return;
 
-  const root = findPlaylistPanelRoot();
+  const surface = getPlaylistSurface();
+  const root = surface?.root || null;
 
   if (!root) {
     if (!state.playlistRetryTimer) {
@@ -143,26 +242,37 @@ export function stopPlaylistObserver() {
 }
 
 // ---------------------------
-// PLAY_ITEM: click matching playlist row (watch panel) OR navigate fallback
+// PLAY_ITEM: click matching row on either playlist surface OR navigate fallback
 // ---------------------------
-function findWatchPlaylistAnchorByVideoId(videoId) {
-  const items = Array.from(document.querySelectorAll(SELECTORS.playlistPanelItem));
-  for (const node of items) {
-    const a = node.querySelector(SELECTORS.playlistItemAnchor.join(","));
-    const v = extractVideoIdFromHref(a?.getAttribute("href") || "");
-    if (v === videoId) return a || node;
+function findPlaylistAnchorByVideoId(root, itemSelectors, videoId) {
+  if (!root) return null;
+
+  const nodes = collectItemNodes(root, itemSelectors);
+  for (const node of nodes) {
+    const anchor = findItemAnchor(node);
+    const candidateId = extractVideoIdFromHref(anchor?.getAttribute("href") || "") ||
+      node.getAttribute?.("video-id") ||
+      node.getAttribute?.("data-video-id") ||
+      null;
+    if (candidateId === videoId) return anchor || node;
   }
   return null;
 }
 
+function findWatchPlaylistAnchorByVideoId(videoId) {
+  return findPlaylistAnchorByVideoId(
+    findPlaylistPanelRoot(),
+    SELECTORS.playlistPanelItem,
+    videoId,
+  );
+}
+
 function findPlaylistPageAnchorByVideoId(videoId) {
-  const items = Array.from(document.querySelectorAll(SELECTORS.playlistPageItem));
-  for (const node of items) {
-    const a = node.querySelector(SELECTORS.playlistItemAnchor.join(","));
-    const v = extractVideoIdFromHref(a?.getAttribute("href") || "");
-    if (v === videoId) return a || node;
-  }
-  return null;
+  return findPlaylistAnchorByVideoId(
+    findPlaylistPageRoot(),
+    SELECTORS.playlistPageItem,
+    videoId,
+  );
 }
 
 function navigateToVideo(videoId) {
@@ -179,14 +289,14 @@ function navigateToVideo(videoId) {
 export function playPlaylistItemByVideoId(videoId) {
   if (!videoId) return false;
 
-  // 1) Watch page playlist panel (best)
-  const a1 = findWatchPlaylistAnchorByVideoId(videoId);
-  if (a1 && clickLikeUser(a1)) return true;
+  // 1) Watch page playlist panel (best).
+  const watchAnchor = findWatchPlaylistAnchorByVideoId(videoId);
+  if (watchAnchor && clickLikeUser(watchAnchor)) return true;
 
-  // 2) Playlist page
-  const a2 = findPlaylistPageAnchorByVideoId(videoId);
-  if (a2 && clickLikeUser(a2)) return true;
+  // 2) Standalone /playlist page.
+  const pageAnchor = findPlaylistPageAnchorByVideoId(videoId);
+  if (pageAnchor && clickLikeUser(pageAnchor)) return true;
 
-  // 3) Fallback navigation
+  // 3) URL fallback, preserving the current playlist id when available.
   return navigateToVideo(videoId);
 }
