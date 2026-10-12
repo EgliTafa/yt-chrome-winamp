@@ -18,9 +18,12 @@ import {
   saveTimeDisplayModePref,
   saveVizModePref,
   savePlaylistCollapsedPref,
+  saveShadeModePref,
   saveWindowBoundsFromResize,
+  restoreWindowBoundsForMode,
 } from "./prefs.js";
 import { applyMuteUI, applyVolumeUI } from "./audio-ui.js";
+import { applyShadeModeUI } from "./shade.js";
 
 function getVerticalPadding() {
   const outer = document.querySelector(".container");
@@ -56,6 +59,7 @@ export function setPlaylistCollapsed(collapsed) {
 let boundsSaveTimer = null;
 let tabListRefreshTimer = null;
 let tabDiscoveryBound = false;
+let shadeTransitioning = false;
 
 function getSelectedYoutubeTabId() {
   const tabId = Number(el.youtubeTabSelector?.value);
@@ -174,17 +178,18 @@ async function resizeWindowToContent(options = {}) {
     const currentWindow = await chrome.windows.getCurrent();
     if (!currentWindow?.id) return;
 
-    const verticalPadding = getVerticalPadding();
-    const collapsedMin = measureCollapsedHeight(verticalPadding);
-
     // Let layout settle before measuring after collapse/expand changes.
     await new Promise((resolve) => requestAnimationFrame(resolve));
+
+    const verticalPadding = getVerticalPadding();
+    const collapsedMin = measureCollapsedHeight(verticalPadding);
 
     const desiredHeight = state.playlistCollapsed
       ? collapsedMin
       : measureExpandedHeight(verticalPadding);
 
-    let newHeight = Math.max(240, collapsedMin, desiredHeight);
+    const minimumHeight = state.shadeMode ? 160 : 240;
+    let newHeight = Math.max(minimumHeight, collapsedMin, desiredHeight);
 
     if (growOnly && typeof currentWindow.height === "number") {
       newHeight = Math.max(newHeight, currentWindow.height);
@@ -199,6 +204,29 @@ async function resizeWindowToContent(options = {}) {
   }
 }
 
+async function toggleShadeMode() {
+  if (shadeTransitioning) return;
+  shadeTransitioning = true;
+  if (el.shadeToggleBtn) el.shadeToggleBtn.disabled = true;
+
+  try {
+    // Store the outgoing mode separately so compact sizing never replaces the
+    // user's preferred full-player bounds (and vice versa).
+    await saveWindowBoundsFromResize();
+
+    const nextMode = !state.shadeMode;
+    applyShadeModeUI(nextMode);
+    saveShadeModePref(nextMode);
+
+    const restored = await restoreWindowBoundsForMode(nextMode);
+    if (!restored) await resizeWindowToContent();
+    scheduleMarqueeUpdate();
+  } finally {
+    shadeTransitioning = false;
+    if (el.shadeToggleBtn) el.shadeToggleBtn.disabled = false;
+  }
+}
+
 export function bindUI() {
   // hide unused
   // (if these exist in DOM)
@@ -210,6 +238,11 @@ export function bindUI() {
   if (el.playBtn) el.playBtn.addEventListener("click", () => sendCommand("PLAY"));
   if (el.stopBtn) el.stopBtn.addEventListener("click", onStop);
   if (el.pauseBtn) el.pauseBtn.addEventListener("click", onPause);
+  if (el.shadeToggleBtn) {
+    el.shadeToggleBtn.addEventListener("click", () => {
+      void toggleShadeMode();
+    });
+  }
 
   el.navBtns?.forEach((btn) => {
     btn.addEventListener("click", () => {

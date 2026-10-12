@@ -3,6 +3,7 @@ import { state } from "./state.js";
 import { setVizMode, getVizMode } from "./viz.js";
 import { applyMuteUI, applyVolumeUI, normalizeVolume } from "./audio-ui.js";
 import { updateTimeDisplay } from "./status.js";
+import { applyShadeModeUI } from "./shade.js";
 
 const SYNC_KEYS = [
   "volume",
@@ -13,6 +14,7 @@ const SYNC_KEYS = [
   "playlistCollapsed",
   "sortAlphabetical",
   "youtubeTabId",
+  "shadeMode",
 ];
 const LOCAL_SYNC_FALLBACK_KEY = "syncPrefsFallback";
 
@@ -150,6 +152,7 @@ export async function loadAndApplyPrefs() {
   try {
     localData = await chrome.storage.local.get([
       "windowBounds",
+      "shadeWindowBounds",
       LOCAL_SYNC_FALLBACK_KEY,
       ...SYNC_KEYS,
     ]);
@@ -211,22 +214,27 @@ export async function loadAndApplyPrefs() {
     state.preferredYoutubeTabId = tabId;
   }
 
-  const bounds = localData.windowBounds;
+  applyShadeModeUI(prefs.shadeMode === true);
+
+  const bounds = state.shadeMode
+    ? localData.shadeWindowBounds
+    : localData.windowBounds;
   if (bounds && typeof bounds === "object") {
-    await restoreWindowBounds(bounds);
+    await restoreWindowBounds(bounds, state.shadeMode);
   }
 }
 
-async function restoreWindowBounds(bounds) {
+async function restoreWindowBounds(bounds, shadeMode = false) {
   try {
     const win = await chrome.windows.getCurrent();
-    if (!win?.id) return;
+    if (!win?.id) return false;
 
     const update = {};
     if (Number.isFinite(bounds.width) && bounds.width >= 320) {
       update.width = Math.round(bounds.width);
     }
-    if (Number.isFinite(bounds.height) && bounds.height >= 240) {
+    const minimumHeight = shadeMode ? 160 : 240;
+    if (Number.isFinite(bounds.height) && bounds.height >= minimumHeight) {
       update.height = Math.round(bounds.height);
     }
     if (Number.isFinite(bounds.left)) update.left = Math.round(bounds.left);
@@ -235,21 +243,36 @@ async function restoreWindowBounds(bounds) {
     if (Object.keys(update).length) {
       await chrome.windows.update(win.id, update);
       restoredWindowBounds = true;
+      return true;
     }
   } catch (_) { /* ignore */ }
+  return false;
+}
+
+export async function restoreWindowBoundsForMode(shadeMode = state.shadeMode) {
+  try {
+    const key = shadeMode ? "shadeWindowBounds" : "windowBounds";
+    const localData = await chrome.storage.local.get([key]);
+    const bounds = localData[key];
+    if (!bounds || typeof bounds !== "object") return false;
+    return restoreWindowBounds(bounds, shadeMode);
+  } catch (_) {
+    return false;
+  }
 }
 
 export async function saveWindowBoundsFromResize() {
   try {
     const win = await chrome.windows.getCurrent();
     if (!win?.id) return;
-    const windowBounds = {
+    const bounds = {
       left: win.left,
       top: win.top,
       width: win.width,
       height: win.height,
     };
-    await chrome.storage.local.set({ windowBounds });
+    const key = state.shadeMode ? "shadeWindowBounds" : "windowBounds";
+    await chrome.storage.local.set({ [key]: bounds });
   } catch (_) { /* ignore */ }
 }
 
@@ -304,6 +327,10 @@ export function saveVizModePref() {
 
 export function savePlaylistCollapsedPref(collapsed) {
   queueSavePrefs({ playlistCollapsed: !!collapsed });
+}
+
+export function saveShadeModePref(enabled) {
+  queueSavePrefs({ shadeMode: !!enabled });
 }
 
 export function saveSortAlphabeticalPref(on) {

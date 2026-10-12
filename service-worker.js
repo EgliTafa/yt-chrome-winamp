@@ -1,3 +1,5 @@
+import { handleMediaCommand } from "./background/media-commands.js";
+
 let playerWindowId = null;
 
 chrome.action.onClicked.addListener(async () => {
@@ -25,4 +27,8 @@ async function openOrFocusPlayerWindow() {
 
 chrome.windows.onRemoved.addListener((winId) => {
   if (winId === playerWindowId) playerWindowId = null;
+});
+
+chrome.commands.onCommand.addListener((command) => {
+  void handleMediaCommand(command);
 });

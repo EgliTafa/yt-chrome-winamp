@@ -113,6 +113,40 @@ function readTitle(node, anchor) {
   return cleanTitle(anchor?.getAttribute("aria-label") || anchor?.textContent || "");
 }
 
+function normalizeThumbnailUrl(rawUrl) {
+  const value = String(rawUrl || "").trim();
+  if (!value || value.startsWith("data:") || value.startsWith("blob:")) return "";
+  try {
+    const parsed = new URL(value, window.location.origin);
+    return parsed.protocol === "https:" ? parsed.href : "";
+  } catch (_) {
+    return "";
+  }
+}
+
+function readThumbnailUrl(node, videoId) {
+  for (const selector of selectorList(SELECTORS.playlistItemThumbnail)) {
+    const image = node.matches?.(selector) ? node : node.querySelector?.(selector);
+    if (!image) continue;
+
+    const srcset = String(image.getAttribute?.("srcset") || "").trim();
+    const largestSrcsetUrl = srcset
+      ? srcset.split(",").at(-1)?.trim().split(/\s+/)[0]
+      : "";
+    const candidate = normalizeThumbnailUrl(
+      largestSrcsetUrl ||
+      image.currentSrc ||
+      image.getAttribute?.("src") ||
+      image.getAttribute?.("data-src")
+    );
+    if (candidate) return candidate;
+  }
+
+  return videoId
+    ? `https://i.ytimg.com/vi/${encodeURIComponent(videoId)}/default.jpg`
+    : "";
+}
+
 function isCurrentItem(node, anchor, videoId) {
   const currentVideoId = new URLSearchParams(window.location.search).get("v");
   return node.hasAttribute?.("selected") ||
@@ -149,6 +183,7 @@ export function scrapePlaylistItems() {
       index: items.length + 1,
       title,
       videoId,
+      thumbnailUrl: readThumbnailUrl(node, videoId),
       isCurrent: !!isCurrentItem(node, anchor, videoId),
     });
   }
@@ -157,7 +192,9 @@ export function scrapePlaylistItems() {
 }
 
 function computeSig(items) {
-  return items.map(x => `${x.videoId || ""}:${x.title}:${x.isCurrent ? 1 : 0}`).join("|");
+  return items
+    .map(x => `${x.videoId || ""}:${x.title}:${x.thumbnailUrl || ""}:${x.isCurrent ? 1 : 0}`)
+    .join("|");
 }
 
 export function sendPlaylistItems(force = false) {
@@ -169,7 +206,12 @@ export function sendPlaylistItems(force = false) {
     if (!state.lastSentEmpty) {
       state.lastSentEmpty = true;
       state.lastPlaylistSig = "";
-      safePost({ type: "PLAYLIST_ITEMS", items: [] });
+      safePost({
+        type: "PLAYLIST_ITEMS",
+        items: [],
+        surface: null,
+        playlistId: state.currentPlaylistId,
+      });
     }
     return;
   }
@@ -182,7 +224,12 @@ export function sendPlaylistItems(force = false) {
   if (!force && sig === state.lastPlaylistSig) return;
   state.lastPlaylistSig = sig;
 
-  safePost({ type: "PLAYLIST_ITEMS", items });
+  safePost({
+    type: "PLAYLIST_ITEMS",
+    items,
+    surface: surface.kind,
+    playlistId: state.currentPlaylistId,
+  });
 }
 
 function throttledSendPlaylist() {
@@ -223,7 +270,7 @@ export function ensurePlaylistObserver(forceRestart = false) {
     childList: true,
     subtree: true,
     attributes: true,
-    attributeFilter: ["selected", "aria-current", "href", "title", "class"],
+    attributeFilter: ["selected", "aria-current", "href", "title", "class", "src", "srcset"],
   });
 
   sendPlaylistItems(true);

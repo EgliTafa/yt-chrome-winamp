@@ -62,6 +62,11 @@ export const SELECTORS = {
     "yt-formatted-string#video-title",
     "[title]",
   ],
+  playlistItemThumbnail: [
+    "yt-image img",
+    "img.yt-core-image",
+    "img[src]",
+  ],
   playlistFallbackAnchor: [
     "a#video-title[href*='watch?v=']",
     "a.yt-simple-endpoint[href*='watch?v=']",

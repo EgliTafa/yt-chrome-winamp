@@ -15,6 +15,8 @@ import {
   seekTo,
   setVolume,
   setMuted,
+  togglePlayPause,
+  adjustVolume,
   setShuffle,
   setLoop,
 } from "./player-controls.js";
@@ -60,6 +62,7 @@ export function handleExtensionMessage(msg) {
 
   switch (msg.type) {
     case "PLAY": playVideo(); break;
+    case "PLAY_PAUSE": togglePlayPause(); break;
     case "PAUSE": pauseVideo(); break;
     case "STOP": stopVideo(); break;
     case "NEXT": nextVideo(); break;
@@ -80,6 +83,12 @@ export function handleExtensionMessage(msg) {
       const muted = asBoolean(msg.value);
       if (muted === null) break;
       setMuted(muted);
+      break;
+    }
+    case "VOLUME_DELTA": {
+      const delta = clampNumber(msg.value, -100, 100);
+      if (delta === null) break;
+      adjustVolume(delta);
       break;
     }
     case "SHUFFLE": {

@@ -18,6 +18,9 @@ export const state = {
   lastDuration: 0,
   lastCurrentTime: 0,
   lastTitle: "",
+  lastVideoId: "",
+  lastPlaylistId: "",
+  lastYouTubeUrl: "",
   timeDisplayMode: "elapsed",
 
   userDraggingProgress: false,
@@ -41,6 +44,7 @@ export const state = {
   preMuteVolume: 100,
 
   playlistCollapsed: false,
+  shadeMode: false,
 
   preferredYoutubeTabId: null,
 };

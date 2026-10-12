@@ -16,6 +16,7 @@ export function disableBecauseInvalidated(err) {
 }
 
 let onConnectHandler = null;
+let onRuntimeMessageHandler = null;
 
 function setContentConnectionPhase(next) {
   state.connectionPhase = next;
@@ -37,6 +38,9 @@ export function destroy(reason) {
 
   try {
     if (onConnectHandler) chrome.runtime?.onConnect?.removeListener(onConnectHandler);
+  } catch (_) { }
+  try {
+    if (onRuntimeMessageHandler) chrome.runtime?.onMessage?.removeListener(onRuntimeMessageHandler);
   } catch (_) { }
 
   try { state.port?.disconnect(); } catch (_) { }
@@ -88,10 +92,29 @@ export function initializeConnection() {
   }
 
   globalThis[INSTANCE_KEY] = { destroy };
+  state.disabled = false;
+
+  onRuntimeMessageHandler = (message, sender, sendResponse) => {
+    if (
+      state.disabled ||
+      sender?.id !== chrome.runtime.id ||
+      message?.source !== "maxamp-media-command" ||
+      !message.command?.type
+    ) return false;
+
+    handleExtensionMessage(message.command);
+    sendResponse?.({
+      ok: true,
+      volume: state.volume,
+      muted: state.muted,
+    });
+    return false;
+  };
 
   try {
     setContentConnectionPhase(CONTENT_CONNECTION_PHASES.LISTENING);
     chrome.runtime.onConnect.addListener(onConnectHandler);
+    chrome.runtime.onMessage.addListener(onRuntimeMessageHandler);
   } catch (e) {
     disableBecauseInvalidated(e);
     return;

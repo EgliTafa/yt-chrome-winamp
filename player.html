@@ -17,6 +17,13 @@
           <div class="line line-first"></div>
           <h1>WINAMP</h1>
           <div class="line line-first"></div>
+          <button
+            class="shade-toggle-btn"
+            type="button"
+            title="Enter shade mode"
+            aria-label="Enter shade mode"
+            aria-pressed="false"
+          >▴</button>
         </div>
 
         <div class="cmd-container">
@@ -43,6 +50,7 @@
             <div class="time-container--right">
               <!-- Winamp-like title row (seamless marquee + mini viz) -->
               <div class="track-row">
+                <img class="now-playing-thumbnail" alt="" hidden />
                 <div class="track-title-marquee">
                   <div class="track-title-inner">
                     <span class="track-title-text"></span>
@@ -102,8 +110,13 @@
           </div>
 
           <div class="playlist">
-            <div class="hint">
-              Playlist is read from the selected YouTube tab.
+            <div class="playlist-hint-row">
+              <div class="hint playlist-hint">
+                Playlist is read from the selected YouTube tab.
+              </div>
+              <button class="show-playlist-btn" type="button" hidden>
+                SHOW PLAYLIST ON YOUTUBE
+              </button>
             </div>
 
             <div class="playlist-tools">

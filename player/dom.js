@@ -9,6 +9,7 @@ export const el = {
   trackTitleInner: qs(".track-title-inner"),
   trackTitleTextA: qs(".track-title-text"),
   trackTitleTextB: qs(".track-title-text.clone"),
+  nowPlayingThumbnail: qs(".now-playing-thumbnail"),
 
   // controls
   timeDisplayer: qs(".time-displayer"),
@@ -21,6 +22,7 @@ export const el = {
   stopBtn: qs(".stop-btn"),
   shuffleBtn: qs(".shuffle-btn"),
   repeatBtn: qs(".repeat-btn"),
+  shadeToggleBtn: qs(".shade-toggle-btn"),
 
   youtubeTabSelector: qs(".youtube-tab-selector"),
   connectBtn: qs(".connect-btn"),

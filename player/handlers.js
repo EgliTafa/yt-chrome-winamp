@@ -5,8 +5,9 @@ import { setHighlighted, setStatus, updateTimeDisplay } from "./status.js";
 import { setTrackTitle } from "./marquee.js";
 import { startUpdateInterval } from "./commands.js";
 import { startViz, stopViz, setAudioBars, setWaveformPoints } from "./viz.js";
-import { setPlaylistItems } from "./playlist.js";
+import { setPlaylistContext, setPlaylistItems } from "./playlist.js";
 import { applyMuteUI, applyVolumeUI } from "./audio-ui.js";
+import { clearNowPlayingThumbnail, setNowPlayingThumbnail } from "./now-playing.js";
 
 export function handleContentMessage(msg) {
   if (!msg?.type) return;
@@ -27,7 +28,10 @@ export function handleContentMessage(msg) {
       break;
 
     case "PLAYLIST_ITEMS":
-      setPlaylistItems(msg.items);
+      setPlaylistItems(msg.items, {
+        surface: msg.surface,
+        playlistId: msg.playlistId,
+      });
       break;
 
     case "PLAY_ITEM_ACK":
@@ -44,9 +48,21 @@ export function handleContentMessage(msg) {
 }
 
 export function handleYouTubeState(stateMsg) {
+  state.lastPlaylistId = String(stateMsg.playlistId || "");
+  state.lastYouTubeUrl = String(stateMsg.url || "");
+  if (stateMsg.videoId) state.lastVideoId = String(stateMsg.videoId);
+  setPlaylistContext({ playlistId: state.lastPlaylistId });
+
   if (!stateMsg.hasPlayer) {
-    setStatus("No video player found on this YouTube page.");
+    const isPlaylistPage = state.lastPlaylistId && (() => {
+      try { return new URL(state.lastYouTubeUrl).pathname === "/playlist"; }
+      catch (_) { return false; }
+    })();
+    setStatus(isPlaylistPage
+      ? `Connected to playlist page: ${state.lastPlaylistId}`
+      : "No video player found on this YouTube page.");
     if (el.nowPlaying) el.nowPlaying.textContent = "";
+    if (!stateMsg.videoId) clearNowPlayingThumbnail();
     stopViz();
     return;
   }
@@ -64,7 +80,12 @@ export function handleYouTubeState(stateMsg) {
 
 export function handlePlayerInfo(info) {
   if (info.error) {
-    setStatus(info.error);
+    let isPlaylistPage = false;
+    try { isPlaylistPage = new URL(state.lastYouTubeUrl).pathname === "/playlist"; }
+    catch (_) { }
+    setStatus(isPlaylistPage && state.lastPlaylistId
+      ? `Connected to playlist page: ${state.lastPlaylistId}`
+      : info.error);
     stopViz();
     return;
   }
@@ -72,6 +93,10 @@ export function handlePlayerInfo(info) {
   if (Number.isFinite(info.currentTime)) state.lastCurrentTime = info.currentTime;
   if (Number.isFinite(info.duration) && info.duration > 0) state.lastDuration = info.duration;
   if (typeof info.title === "string" && info.title) state.lastTitle = info.title;
+  if (typeof info.videoId === "string" && info.videoId) {
+    state.lastVideoId = info.videoId;
+    setNowPlayingThumbnail(info.videoId);
+  }
 
   if (typeof info.volume === "number" && info.volume !== state.volume) {
     applyVolumeUI(info.volume);

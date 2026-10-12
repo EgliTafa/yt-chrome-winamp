@@ -22,7 +22,9 @@ const { scrapePlaylistItems } = await import("../content-script/playlist.js");
 test("scrapes the watch-page playlist panel", () => {
   const root = createRoot({
     "ytd-playlist-panel-video-renderer": [
-      createRendererRow("panel-1", "Panel One"),
+      createRendererRow("panel-1", "Panel One", {
+        thumbnailUrl: "https://i.ytimg.com/vi/panel-1/mqdefault.jpg",
+      }),
       createRendererRow("panel-2", "Panel Two", { selected: true }),
     ],
   });
@@ -33,6 +35,8 @@ test("scrapes the watch-page playlist panel", () => {
     { videoId: "panel-1", title: "Panel One", isCurrent: false },
     { videoId: "panel-2", title: "Panel Two", isCurrent: true },
   ]);
+  assert.equal(items[0].thumbnailUrl, "https://i.ytimg.com/vi/panel-1/mqdefault.jpg");
+  assert.equal(items[1].thumbnailUrl, "https://i.ytimg.com/vi/panel-2/default.jpg");
 });
 
 test("scrapes the standalone playlist-page listing", () => {

@@ -19,14 +19,22 @@ export function createAnchor(videoId, title, { current = false } = {}) {
   };
 }
 
-export function createRendererRow(videoId, title, { selected = false } = {}) {
+export function createRendererRow(videoId, title, { selected = false, thumbnailUrl = "" } = {}) {
   const anchor = createAnchor(videoId, title);
+  const image = thumbnailUrl ? {
+    currentSrc: thumbnailUrl,
+    matches() { return false; },
+    getAttribute(name) {
+      return name === "src" ? thumbnailUrl : null;
+    },
+  } : null;
   return {
     textContent: title,
     matches() {
       return false;
     },
-    querySelector() {
+    querySelector(selector) {
+      if (image && selector.includes("img")) return image;
       return anchor;
     },
     hasAttribute(name) {

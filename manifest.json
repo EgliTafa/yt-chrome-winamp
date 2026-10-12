@@ -15,6 +15,37 @@
   "action": {
     "default_title": "Open Winamp Player"
   },
+  "commands": {
+    "media-play-pause": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+7"
+      },
+      "description": "Play or pause the pinned YouTube tab",
+      "global": true
+    },
+    "media-next": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+8"
+      },
+      "description": "Play the next track in the pinned YouTube tab",
+      "global": true
+    },
+    "media-previous": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+9"
+      },
+      "description": "Play the previous track in the pinned YouTube tab",
+      "global": true
+    },
+    "volume-up": {
+      "description": "Raise volume in the pinned YouTube tab",
+      "global": true
+    },
+    "volume-down": {
+      "description": "Lower volume in the pinned YouTube tab",
+      "global": true
+    }
+  },
   "content_scripts": [
     {
       "matches": [

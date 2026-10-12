@@ -4,6 +4,7 @@ import { state } from "./state.js";
 import { setStatus } from "./status.js";
 import { sendCommand } from "./commands.js";
 import { saveSortAlphabeticalPref } from "./prefs.js";
+import { setNowPlayingThumbnail } from "./now-playing.js";
 
 // Import resize function (will be defined in events.js)
 let resizeWindowToContent = null;
@@ -14,9 +15,13 @@ export function setResizeFunction(fn) {
 const playlistSearch = qs(".playlist-search");
 const playlistItemsEl = qs(".playlist-items");
 const sortBtn = qs(".playlist-sort-btn");
+const playlistHint = qs(".playlist-hint");
+const showPlaylistBtn = qs(".show-playlist-btn");
 
 let playlistItems = [];
 let sortAlphabetical = false;
+let playlistSurface = null;
+let playlistId = "";
 
 export function applyPlaylistSortPreference(on) {
   sortAlphabetical = !!on;
@@ -67,14 +72,63 @@ export function initPlaylistUI() {
       saveSortAlphabeticalPref(sortAlphabetical);
     });
   }
+  if (showPlaylistBtn) {
+    showPlaylistBtn.addEventListener("click", openPlaylistOnYouTube);
+  }
+  updatePlaylistHint();
 }
 
-export function setPlaylistItems(items) {
+export function setPlaylistContext(context = {}) {
+  if ("playlistId" in context) playlistId = String(context.playlistId || "");
+  if ("surface" in context) playlistSurface = context.surface || null;
+  updatePlaylistHint();
+}
+
+export function setPlaylistItems(items, context = {}) {
   playlistItems = Array.isArray(items) ? items : [];
+  setPlaylistContext(context);
+
+  const currentItem = playlistItems.find((item) => item?.isCurrent && item?.videoId);
+  if (currentItem) {
+    setNowPlayingThumbnail(currentItem.videoId, currentItem.thumbnailUrl, 2);
+  }
+
   renderPlaylist();
   // Grow window when playlist fills in; never shrink (avoids hiding header after collapse/item click).
   if (resizeWindowToContent && !state.playlistCollapsed) {
     setTimeout(() => resizeWindowToContent({ growOnly: true }), 50);
+  }
+}
+
+function updatePlaylistHint() {
+  if (showPlaylistBtn) {
+    showPlaylistBtn.hidden = !playlistId || playlistSurface === "playlist-page";
+  }
+  if (!playlistHint) return;
+
+  if (playlistItems.length) {
+    playlistHint.textContent = playlistSurface === "playlist-page"
+      ? "Playlist loaded from the YouTube playlist page."
+      : "Playlist loaded from the YouTube watch panel.";
+  } else if (playlistId) {
+    playlistHint.textContent = "Playlist listing is not visible. Open its YouTube page to load every track.";
+  } else {
+    playlistHint.textContent = "Open a YouTube playlist, then connect or switch to that tab.";
+  }
+}
+
+async function openPlaylistOnYouTube() {
+  if (!playlistId) {
+    setStatus("The current YouTube page does not expose a playlist ID.");
+    return;
+  }
+
+  const url = `https://www.youtube.com/playlist?list=${encodeURIComponent(playlistId)}`;
+  try {
+    await chrome.tabs.create({ url, active: true });
+    setStatus("Opened the playlist page on YouTube. Select that tab to connect.");
+  } catch (error) {
+    setStatus(`Could not open playlist: ${error?.message || "unknown error"}`);
   }
 }
 

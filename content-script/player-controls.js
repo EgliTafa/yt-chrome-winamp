@@ -28,6 +28,28 @@ export function setMuted(enabled) {
   }
 }
 
+export function togglePlayPause() {
+  const video = getVideoEl();
+  if (!video) return;
+  if (video.paused) playVideo();
+  else pauseVideo();
+}
+
+export function adjustVolume(delta) {
+  const video = getVideoEl();
+  const currentVolume = state.volume !== null
+    ? state.volume
+    : Math.round((video?.volume ?? 1) * 100);
+  const nextVolume = Math.max(0, Math.min(100, Math.round(currentVolume + Number(delta || 0))));
+
+  state.volume = nextVolume;
+  if (nextVolume > 0) state.muted = false;
+  if (video) {
+    applyVolumeToVideo(video);
+    sendPlayerInfo();
+  }
+}
+
 export function seekTo(seconds) {
   const video = getVideoEl();
   if (video) {
