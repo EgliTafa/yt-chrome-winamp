@@ -3,7 +3,7 @@
   "name": "YT Winamp Playlist Player",
   "version": "1.0.0",
   "description": "Winamp-like YouTube playlist player with optional always-on-top PiP controls. Open on an active YouTube video/playlist to take control.",
-  "permissions": ["windows", "tabs", "scripting"],
+  "permissions": ["windows", "tabs", "scripting", "storage"],
   "host_permissions": [
     "https://www.youtube.com/*",
     "https://youtube.com/*"
@@ -32,7 +32,18 @@
     {
       "matches": ["https://www.youtube.com/*", "https://youtube.com/*"],
       "resources": [
-        "content-script/*.js"
+        "content-script/connection.js",
+        "content-script/handlers.js",
+        "content-script/helpers.js",
+        "content-script/monitoring.js",
+        "content-script/player-controls.js",
+        "content-script/player-info.js",
+        "content-script/playlist.js",
+        "content-script/selectors.js",
+        "content-script/state.js",
+        "content-script/url-watcher.js",
+        "content-script/volume-sync.js",
+        "content-script/visualiser.js"
       ]
     }
   ]

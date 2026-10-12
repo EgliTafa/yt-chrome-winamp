@@ -1,5 +1,5 @@
 // content-script/connection.js
-import { state, INSTANCE_KEY } from "./state.js";
+import { state, INSTANCE_KEY, CONTENT_CONNECTION_PHASES } from "./state.js";
 import { handleExtensionMessage } from "./handlers.js";
 import { detectAndSendState } from "./player-info.js";
 import { sendPlayerInfo } from "./player-info.js";
@@ -17,10 +17,15 @@ export function disableBecauseInvalidated(err) {
 
 let onConnectHandler = null;
 
+function setContentConnectionPhase(next) {
+  state.connectionPhase = next;
+}
+
 export function destroy(reason) {
   try { console.debug("[MAXAMP] destroy:", reason); } catch (_) { }
 
   state.disabled = true;
+  setContentConnectionPhase(CONTENT_CONNECTION_PHASES.DESTROYED);
 
   try { stopVisualiserStream(); } catch (_) { }
   try { cleanupAudio(); } catch (_) { }
@@ -53,9 +58,11 @@ onConnectHandler = function (connectedPort) {
   }
 
   state.port = connectedPort;
+  setContentConnectionPhase(CONTENT_CONNECTION_PHASES.CONNECTED);
 
   state.port.onDisconnect.addListener(() => {
     state.port = null;
+    setContentConnectionPhase(CONTENT_CONNECTION_PHASES.DISCONNECTED);
 
     try { stopVisualiserStream(); } catch (_) { }
     try { cleanupAudio(); } catch (_) { }
@@ -68,7 +75,7 @@ onConnectHandler = function (connectedPort) {
   });
 
   detectAndSendState();
-  setTimeout(sendPlayerInfo, 250);
+  sendPlayerInfo();
 
   ensurePlaylistObserver(false);
   sendPlaylistItems(true);
@@ -83,6 +90,7 @@ export function initializeConnection() {
   globalThis[INSTANCE_KEY] = { destroy };
 
   try {
+    setContentConnectionPhase(CONTENT_CONNECTION_PHASES.LISTENING);
     chrome.runtime.onConnect.addListener(onConnectHandler);
   } catch (e) {
     disableBecauseInvalidated(e);

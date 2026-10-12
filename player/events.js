@@ -7,30 +7,81 @@ import { connectToYouTubeTab } from "./connection.js";
 import { stopViz, cycleVizMode, getVizModeName } from "./viz.js";
 import { scheduleUpdate as scheduleMarqueeUpdate } from "./marquee.js";
 import { setResizeFunction } from "./playlist.js";
+import {
+  shouldSkipInitialWindowResize,
+  saveVolumePref,
+  saveVizModePref,
+  savePlaylistCollapsedPref,
+  saveWindowBoundsFromResize,
+} from "./prefs.js";
 
-async function resizeWindowToContent() {
+function getVerticalPadding() {
+  const outer = document.querySelector(".container");
+  const outerStyle = outer ? getComputedStyle(outer) : null;
+  return outerStyle
+    ? (parseFloat(outerStyle.paddingTop) || 0) + (parseFloat(outerStyle.paddingBottom) || 0)
+    : 24;
+}
+
+/** Minimum height so controls + "WINAMP PLAYLIST" header stay visible and clickable. */
+function measureCollapsedHeight(verticalPadding) {
+  const top = document.querySelector(".top-container");
+  const playlistContainer = document.querySelector(".playlist-container");
+  const bodyHeight =
+    (top?.offsetHeight || 0) + (playlistContainer?.offsetHeight || 0);
+  return Math.ceil(bodyHeight + verticalPadding + 8);
+}
+
+function measureExpandedHeight(verticalPadding) {
+  const container = document.querySelector(".maxamp-container");
+  if (!container) return measureCollapsedHeight(verticalPadding);
+  return Math.ceil(container.offsetHeight + verticalPadding + 8);
+}
+
+export function setPlaylistCollapsed(collapsed) {
+  state.playlistCollapsed = collapsed;
+  const container = document.querySelector(".playlist-container");
+  if (container) {
+    container.classList.toggle("collapsed", collapsed);
+  }
+}
+
+let boundsSaveTimer = null;
+function debouncedSaveWindowBounds() {
+  if (boundsSaveTimer) clearTimeout(boundsSaveTimer);
+  boundsSaveTimer = setTimeout(() => {
+    boundsSaveTimer = null;
+    saveWindowBoundsFromResize();
+  }, 450);
+}
+
+async function resizeWindowToContent(options = {}) {
+  const { growOnly = false } = options;
+
   try {
     const currentWindow = await chrome.windows.getCurrent();
     if (!currentWindow?.id) return;
 
-    const container = document.querySelector(".maxamp-container");
-    if (!container) return;
-
-    const outer = document.querySelector(".container");
-    const outerStyle = outer ? getComputedStyle(outer) : null;
-    const verticalPadding = outerStyle
-      ? (parseFloat(outerStyle.paddingTop) || 0) + (parseFloat(outerStyle.paddingBottom) || 0)
-      : 24;
+    const verticalPadding = getVerticalPadding();
+    const collapsedMin = measureCollapsedHeight(verticalPadding);
 
     // Let layout settle before measuring after collapse/expand changes.
     await new Promise((resolve) => requestAnimationFrame(resolve));
 
-    const contentHeight = Math.ceil(container.getBoundingClientRect().height);
-    const newHeight = Math.max(240, Math.ceil(contentHeight + verticalPadding));
+    const desiredHeight = state.playlistCollapsed
+      ? collapsedMin
+      : measureExpandedHeight(verticalPadding);
+
+    let newHeight = Math.max(240, collapsedMin, desiredHeight);
+
+    if (growOnly && typeof currentWindow.height === "number") {
+      newHeight = Math.max(newHeight, currentWindow.height);
+    }
 
     await chrome.windows.update(currentWindow.id, {
       height: newHeight
     });
+    debouncedSaveWindowBounds();
   } catch (error) {
     console.error("Failed to resize window:", error);
   }
@@ -80,6 +131,7 @@ export function bindUI() {
     if (el.visualisationCanvas) {
       el.visualisationCanvas.addEventListener("click", () => {
         cycleVizMode();
+        saveVizModePref();
         setStatus(`Visualizer: ${getVizModeName()}`);
       });
     }
@@ -104,12 +156,14 @@ export function bindUI() {
 
 
   if (el.volumeController) {
-    const initV = Number(el.volumeController.value || 0);
-    root.style.setProperty("--volume-track-lightness", 100 - initV / 2 + "%");
+    state.volume = Number(el.volumeController.value || state.volume);
+    root.style.setProperty("--volume-track-lightness", 100 - state.volume / 2 + "%");
 
     el.volumeController.addEventListener("input", (e) => {
       const v = Number(e.target.value || 0);
+      state.volume = v;
       sendCommand("VOLUME", v);
+      saveVolumePref(v);
       root.style.setProperty("--volume-track-lightness", 100 - v / 2 + "%");
     });
   }
@@ -150,30 +204,24 @@ export function bindUI() {
   }
 
   el.resizable?.forEach((resize) => {
-    resize.addEventListener("click", async () => {
+    resize.addEventListener("click", async (e) => {
+      e.stopPropagation();
       const container = resize.closest(".playlist-container, .visualisation-container");
       if (!container) return;
 
-      // For playlist container, toggle the playlist content visibility
       if (container.classList.contains("playlist-container")) {
-        const playlist = container.querySelector(".playlist");
-        const isCollapsed = playlist?.style.display === "none";
-
-        if (playlist) {
-          playlist.style.display = isCollapsed ? "" : "none";
-          container.classList.toggle("collapsed", !isCollapsed);
-        }
-
-        // Resize window automatically
+        setPlaylistCollapsed(!state.playlistCollapsed);
+        savePlaylistCollapsedPref(state.playlistCollapsed);
         await resizeWindowToContent();
-      } else {
-        // For visualisation container, use the old behavior
-        const currentHeight = container.style.height;
-        const newHeight = currentHeight === "auto" ? "2rem" : "auto";
-        container.style.height = newHeight;
-        if (container.classList.contains("visualisation-container") && newHeight === "2rem") stopViz();
-        await resizeWindowToContent();
+        debouncedSaveWindowBounds();
+        return;
       }
+
+      const currentHeight = container.style.height;
+      const newHeight = currentHeight === "auto" ? "2rem" : "auto";
+      container.style.height = newHeight;
+      if (container.classList.contains("visualisation-container") && newHeight === "2rem") stopViz();
+      await resizeWindowToContent();
     });
   });
 
@@ -194,8 +242,9 @@ export function bindUI() {
   // Export resize function to playlist module
   setResizeFunction(resizeWindowToContent);
 
-  // Resize window on initial load
-  setTimeout(resizeWindowToContent, 100);
+  if (!shouldSkipInitialWindowResize()) {
+    setTimeout(resizeWindowToContent, 100);
+  }
 }
 
 function onStop() {

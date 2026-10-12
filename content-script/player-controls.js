@@ -1,12 +1,19 @@
 // content-script/player-controls.js
+import { state } from "./state.js";
 import { getVideoEl } from "./helpers.js";
 import { sendPlayerInfo } from "./player-info.js";
+import { applyVolumeToVideo, scheduleVolumeSync } from "./volume-sync.js";
 import { getLoopState } from "./player-info.js";
+import { SELECTORS, queryFirst } from "./selectors.js";
 
 export function setVolume(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return;
+  state.volume = Math.max(0, Math.min(100, Math.round(n)));
+
   const video = getVideoEl();
   if (video) {
-    video.volume = Number(value) / 100;
+    applyVolumeToVideo(video);
     sendPlayerInfo();
   }
 }
@@ -20,29 +27,30 @@ export function seekTo(seconds) {
 }
 
 export function nextVideo() {
-  const btn = document.querySelector(".ytp-next-button");
+  const btn = queryFirst(SELECTORS.nextButton);
   if (btn) {
     btn.click();
+    scheduleVolumeSync();
     setTimeout(sendPlayerInfo, 500);
   }
 }
 
 export function previousVideo() {
-  const btn = document.querySelector(".ytp-prev-button");
+  const btn = queryFirst(SELECTORS.previousButton);
   if (btn) {
     btn.click();
+    scheduleVolumeSync();
     setTimeout(sendPlayerInfo, 500);
   } else {
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", code: "ArrowLeft" }));
+    scheduleVolumeSync();
     setTimeout(sendPlayerInfo, 500);
   }
 }
 
 export function playVideo() {
   const video = getVideoEl();
-  const playButton =
-    document.querySelector(".ytp-play-button[aria-label*='Play']") ||
-    document.querySelector(".ytp-play-button:not(.ytp-pause-button)");
+  const playButton = queryFirst(SELECTORS.playButton);
 
   if (video && video.paused) video.play();
   else if (playButton) playButton.click();
@@ -52,9 +60,7 @@ export function playVideo() {
 
 export function pauseVideo() {
   const video = getVideoEl();
-  const pauseButton =
-    document.querySelector(".ytp-play-button.ytp-pause-button") ||
-    document.querySelector(".ytp-play-button[aria-label*='Pause']");
+  const pauseButton = queryFirst(SELECTORS.pauseButton);
 
   if (video && !video.paused) video.pause();
   else if (pauseButton) pauseButton.click();
@@ -72,18 +78,7 @@ export function stopVideo() {
 }
 
 export function setShuffle(enabled) {
-  const selectors = [
-    ".ytp-shuffle-button",
-    "button[aria-label*='Shuffle']",
-    "button[title*='Shuffle']",
-    ".ytp-button[aria-label*='Shuffle']",
-  ];
-
-  let btn = null;
-  for (const s of selectors) {
-    btn = document.querySelector(s);
-    if (btn) break;
-  }
+  const btn = queryFirst(SELECTORS.shuffleButton);
   if (!btn) return;
 
   const isActive =
@@ -97,21 +92,7 @@ export function setShuffle(enabled) {
 }
 
 export function setLoop(mode) {
-  const selectors = [
-    ".ytp-repeat-button",
-    "button[aria-label*='Loop']",
-    "button[aria-label*='Repeat']",
-    "button[title*='Loop']",
-    "button[title*='Repeat']",
-    ".ytp-button[aria-label*='Loop']",
-    ".ytp-button[aria-label*='Repeat']",
-  ];
-
-  let btn = null;
-  for (const s of selectors) {
-    btn = document.querySelector(s);
-    if (btn) break;
-  }
+  const btn = queryFirst(SELECTORS.loopButton);
   if (!btn) return;
 
   const currentMode = getLoopState();

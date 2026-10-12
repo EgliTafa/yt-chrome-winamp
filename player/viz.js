@@ -5,6 +5,9 @@ const ctx = el.visualisationCanvas ? el.visualisationCanvas.getContext("2d") : n
 
 let running = false;
 let raf = null;
+let lastRenderTs = 0;
+let latestDataVersion = 0;
+let renderedDataVersion = -1;
 
 // incoming data
 let latestBars = null;     // 0..255 length VIZ_BARS_COUNT
@@ -19,6 +22,7 @@ let send = null;
 // 0 = classic symmetric (your current), 1 = left->right spectrum, 2 = waveform
 let vizMode = 0;
 const MODE_NAMES = ["CLASSIC", "SPECTRUM", "WAVE"];
+const TARGET_BAR_COLUMNS = 16;
 
 export function initViz({ sendCommand }) {
   send = sendCommand;
@@ -43,11 +47,17 @@ export function cycleVizMode() {
 }
 
 export function setAudioBars(bars) {
-  if (Array.isArray(bars)) latestBars = bars;
+  if (Array.isArray(bars)) {
+    latestBars = bars;
+    latestDataVersion++;
+  }
 }
 
 export function setWaveformPoints(points) {
-  if (Array.isArray(points)) latestWave = points;
+  if (Array.isArray(points)) {
+    latestWave = points;
+    latestDataVersion++;
+  }
 }
 
 function setCanvasCrispSize() {
@@ -75,13 +85,32 @@ function clearBg(W, H) {
   ctx.restore();
 }
 
+function downsampleBarsMax(bars, targetCount) {
+  const n = bars.length;
+  if (!n || targetCount <= 0 || n <= targetCount) return bars;
+
+  const out = new Array(targetCount);
+  for (let i = 0; i < targetCount; i++) {
+    const start = Math.floor((i * n) / targetCount);
+    const end = Math.floor(((i + 1) * n) / targetCount);
+    let maxV = 0;
+
+    for (let j = start; j < Math.max(start + 1, end); j++) {
+      const v = bars[j] ?? 0;
+      if (v > maxV) maxV = v;
+    }
+    out[i] = maxV;
+  }
+  return out;
+}
+
 function drawBarsLeftToRight(bars, W, H) {
   const n = bars.length;
   if (!n) return;
 
   if (peakBars.length !== n) peakBars = new Array(n).fill(0);
 
-  const gap = 2;
+  const gap = 1;
   const barW = Math.max(1, Math.floor((W - (n - 1) * gap) / n));
 
   for (let i = 0; i < n; i++) {
@@ -112,7 +141,7 @@ function drawBarsClassicSymmetric(bars, W, H) {
 
   if (peakBars.length !== total) peakBars = new Array(total).fill(0);
 
-  const gap = 2;
+  const gap = 1;
   const barW = Math.max(1, Math.floor((W - (total - 1) * gap) / total));
   const centerIdx = Math.floor(total / 2);
 
@@ -205,9 +234,25 @@ function drawWaveform(points, W, H) {
   ctx.restore();
 }
 
-function draw() {
+function getTargetRenderFrameMs() {
+  // Use lower FPS when popup/tab is hidden to reduce resource usage.
+  if (document.hidden) return 33;
+  return 16;
+}
+
+function draw(ts = performance.now()) {
   if (!running || !ctx || !el.visualisationCanvas) return;
 
+  const targetFrameMs = getTargetRenderFrameMs();
+  const hasNewData = latestDataVersion !== renderedDataVersion;
+  const elapsed = ts - lastRenderTs;
+  if (!hasNewData && elapsed < targetFrameMs) {
+    raf = requestAnimationFrame(draw);
+    return;
+  }
+
+  lastRenderTs = ts;
+  renderedDataVersion = latestDataVersion;
   setCanvasCrispSize();
 
   const rect = el.visualisationCanvas.getBoundingClientRect();
@@ -221,8 +266,9 @@ function draw() {
   } else {
     const bars = latestBars;
     if (bars && bars.length) {
-      if (vizMode === 1) drawBarsLeftToRight(bars, W, H);
-      else drawBarsClassicSymmetric(bars, W, H);
+      const compactBars = downsampleBarsMax(bars, TARGET_BAR_COLUMNS);
+      if (vizMode === 1) drawBarsLeftToRight(compactBars, W, H);
+      else drawBarsClassicSymmetric(compactBars, W, H);
     }
   }
 
@@ -230,16 +276,22 @@ function draw() {
 }
 
 export function startViz() {
-  if (!el.visualisationCanvas || running) return;
+  if (!el.visualisationCanvas) return;
+
+  // Always re-request the stream while playing in case initial startup raced
+  // with connection/audio graph readiness.
+  if (send) send("START_VIZ");
+
+  if (running) return;
   running = true;
+  lastRenderTs = 0;
+  renderedDataVersion = -1;
 
   el.visualisationCanvas.style.display = "block";
   el.visualisationCanvas.style.cursor = "pointer";
   el.visualisationCanvas.title = "Click to change visualizer";
 
   peakBars = [];
-
-  if (send) send("START_VIZ");
   raf = requestAnimationFrame(draw);
 }
 
@@ -257,6 +309,8 @@ export function stopViz() {
   latestBars = null;
   latestWave = null;
   peakBars = [];
+  lastRenderTs = 0;
+  renderedDataVersion = -1;
 
   if (ctx) ctx.clearRect(0, 0, el.visualisationCanvas.width, el.visualisationCanvas.height);
   el.visualisationCanvas.style.display = "none";

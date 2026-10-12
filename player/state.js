@@ -1,4 +1,13 @@
 // player/state.js
+export const CONNECTION_PHASES = {
+  DISCONNECTED: "disconnected",
+  CONNECTING: "connecting",
+  HANDSHAKING: "handshaking",
+  CONNECTED: "connected",
+  RECONNECTING: "reconnecting",
+  FAILED: "failed",
+};
+
 export const state = {
   play: false,
   pause: false,
@@ -16,9 +25,16 @@ export const state = {
   youtubeTabId: null,
   updateInterval: null,
   isConnected: false,
+  connectionPhase: CONNECTION_PHASES.DISCONNECTED,
 
   reconnectAttempts: 0,
   MAX_RECONNECT_ATTEMPTS: 3,
   reconnectTimeout: null,
-  scrubTime: null
+  scrubTime: null,
+
+  volume: 100,
+
+  playlistCollapsed: false,
+
+  preferredYoutubeTabId: null,
 };

@@ -15,4 +15,5 @@ export function fmtTime(seconds) {
 export function setHighlighted(btn, on) {
   if (!btn) return;
   btn.classList.toggle("highlighted", !!on);
+  btn.setAttribute("aria-pressed", on ? "true" : "false");
 }

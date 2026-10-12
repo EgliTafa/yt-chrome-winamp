@@ -2,6 +2,8 @@
 import { state } from "./state.js";
 import { extractVideoIdFromUrl } from "./helpers.js";
 import { safePost } from "./helpers.js";
+import { SELECTORS, queryFirst } from "./selectors.js";
+import { scheduleVolumeSync } from "./volume-sync.js";
 
 export function detectAndSendState() {
   if (state.disabled) return;
@@ -12,37 +14,38 @@ export function detectAndSendState() {
   const videoId = urlParams.get("v") || extractVideoIdFromUrl(url);
   const playlistId = urlParams.get("list");
 
+  const videoChanged = videoId !== state.currentVideoId;
   state.currentVideoId = videoId;
   state.currentPlaylistId = playlistId;
+
+  if (videoChanged) scheduleVolumeSync();
 
   safePost({
     type: "YOUTUBE_STATE",
     videoId,
     playlistId,
     url: window.location.href,
-    hasPlayer: !!document.querySelector("video"),
+    hasPlayer: !!document.querySelector(SELECTORS.video),
   });
 }
 
 function getShuffleState() {
-  const selectors = [".ytp-shuffle-button", "button[aria-label*='Shuffle']"];
-  for (const s of selectors) {
-    const btn = document.querySelector(s);
-    if (btn) {
-      return (
-        btn.classList.contains("ytp-shuffle-button-enabled") ||
-        btn.getAttribute("aria-pressed") === "true"
-      );
-    }
+  const btn = queryFirst(SELECTORS.shuffleButton);
+  if (btn) {
+    return (
+      btn.classList.contains("ytp-shuffle-button-enabled") ||
+      btn.getAttribute("aria-pressed") === "true"
+    );
   }
   return false;
 }
 
 function getLoopState() {
-  const selectors = [".ytp-repeat-button", "button[aria-label*='Loop']", "button[aria-label*='Repeat']"];
-  for (const s of selectors) {
+  for (const s of SELECTORS.loopButton) {
     const btn = document.querySelector(s);
-    if (!btn) continue;
+    if (!btn) {
+      continue;
+    }
 
     const ariaLabel = btn.getAttribute("aria-label") || "";
     const title = btn.getAttribute("title") || "";
@@ -59,16 +62,13 @@ function getLoopState() {
 export function sendPlayerInfo() {
   if (state.disabled) return;
 
-  const video = document.querySelector("video");
+  const video = document.querySelector(SELECTORS.video);
   if (!video) {
     safePost({ type: "PLAYER_INFO", error: "No video player found" });
     return;
   }
 
-  const titleElement =
-    document.querySelector("h1.ytd-watch-metadata yt-formatted-string") ||
-    document.querySelector(".ytp-title-link") ||
-    document.querySelector("h1.title");
+  const titleElement = queryFirst(SELECTORS.title);
 
   const title = titleElement ? titleElement.textContent.trim() : "";
 
@@ -78,7 +78,10 @@ export function sendPlayerInfo() {
     duration: video.duration,
     playerState: video.paused ? 2 : 1,
     title,
-    volume: Math.round(video.volume * 100),
+    volume:
+      state.volume !== null
+        ? state.volume
+        : Math.round(video.volume * 100),
     videoId: state.currentVideoId,
     playlistId: state.currentPlaylistId,
     shuffle: getShuffleState(),

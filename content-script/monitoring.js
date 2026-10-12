@@ -3,6 +3,7 @@ import { state } from "./state.js";
 import { getVideoEl } from "./helpers.js";
 import { safePost } from "./helpers.js";
 import { sendPlayerInfo } from "./player-info.js";
+import { applyVolumeToVideo, scheduleVolumeSync } from "./volume-sync.js";
 
 function onTimeUpdate() { sendPlayerInfo(); }
 function onPlay() { sendPlayerInfo(); }
@@ -20,9 +21,13 @@ export function startMonitoring() {
   if (state.monitoringVideo !== video) {
     stopMonitoring();
     state.monitoringVideo = video;
+    applyVolumeToVideo(video);
+    scheduleVolumeSync();
     video.addEventListener("timeupdate", onTimeUpdate);
     video.addEventListener("play", onPlay);
     video.addEventListener("pause", onPause);
+  } else if (state.currentVideoId !== state.lastVolumeSyncedVideoId) {
+    scheduleVolumeSync();
   }
 
   sendPlayerInfo();

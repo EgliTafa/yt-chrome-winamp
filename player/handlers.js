@@ -1,5 +1,5 @@
 // player/handlers.js
-import { el } from "./dom.js";
+import { el, root } from "./dom.js";
 import { state } from "./state.js";
 import { fmtTime, setHighlighted, setStatus } from "./status.js";
 import { setTrackTitle } from "./marquee.js";
@@ -71,8 +71,12 @@ export function handlePlayerInfo(info) {
   if (typeof info.duration === "number" && info.duration > 0) state.lastDuration = info.duration;
   if (typeof info.title === "string" && info.title) state.lastTitle = info.title;
 
-  if (typeof info.volume === "number" && el.volumeController) {
-    el.volumeController.value = String(info.volume);
+  if (typeof info.volume === "number" && info.volume !== state.volume) {
+    state.volume = info.volume;
+    if (el.volumeController) {
+      el.volumeController.value = String(info.volume);
+      root.style.setProperty("--volume-track-lightness", 100 - info.volume / 2 + "%");
+    }
   }
 
   if (typeof info.shuffle === "boolean") {

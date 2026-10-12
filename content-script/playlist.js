@@ -2,22 +2,20 @@
 import { state } from "./state.js";
 import { extractVideoIdFromHref, clickLikeUser } from "./helpers.js";
 import { safePost } from "./helpers.js";
+import { SELECTORS } from "./selectors.js";
 
 export function findPlaylistPanelRoot() {
   // Watch page: playlist panel on the right
-  return document.querySelector("ytd-playlist-panel-renderer");
+  return document.querySelector(SELECTORS.playlistPanelRoot);
 }
 
 export function scrapePlaylistItems() {
-  const nodes = Array.from(document.querySelectorAll("ytd-playlist-panel-video-renderer"));
+  const nodes = Array.from(document.querySelectorAll(SELECTORS.playlistPanelItem));
   if (!nodes.length) return [];
 
   return nodes.map((node, i) => {
     // Try to get the title from the title attribute first (cleanest)
-    const a =
-      node.querySelector("a#video-title") ||
-      node.querySelector("a[href*='watch?v=']") ||
-      node.querySelector("#video-title"); // fallback
+    const a = node.querySelector(SELECTORS.playlistItemAnchor.join(","));
 
     let title = "";
     
@@ -148,11 +146,9 @@ export function stopPlaylistObserver() {
 // PLAY_ITEM: click matching playlist row (watch panel) OR navigate fallback
 // ---------------------------
 function findWatchPlaylistAnchorByVideoId(videoId) {
-  const items = Array.from(document.querySelectorAll("ytd-playlist-panel-video-renderer"));
+  const items = Array.from(document.querySelectorAll(SELECTORS.playlistPanelItem));
   for (const node of items) {
-    const a =
-      node.querySelector("a#video-title") ||
-      node.querySelector("a[href*='watch?v=']");
+    const a = node.querySelector(SELECTORS.playlistItemAnchor.join(","));
     const v = extractVideoIdFromHref(a?.getAttribute("href") || "");
     if (v === videoId) return a || node;
   }
@@ -160,11 +156,9 @@ function findWatchPlaylistAnchorByVideoId(videoId) {
 }
 
 function findPlaylistPageAnchorByVideoId(videoId) {
-  const items = Array.from(document.querySelectorAll("ytd-playlist-video-renderer"));
+  const items = Array.from(document.querySelectorAll(SELECTORS.playlistPageItem));
   for (const node of items) {
-    const a =
-      node.querySelector("a#video-title") ||
-      node.querySelector("a[href*='watch?v=']");
+    const a = node.querySelector(SELECTORS.playlistItemAnchor.join(","));
     const v = extractVideoIdFromHref(a?.getAttribute("href") || "");
     if (v === videoId) return a || node;
   }
